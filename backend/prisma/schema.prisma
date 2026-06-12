@@ -14,6 +14,7 @@ model User {
   email        String?
   avatarUrl    String?
   accessToken  String   // Note: Tradeoff - stored unencrypted for portfolio MVP
+  timezone     String   @default("Asia/Kolkata")
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
   commits      Commit[]

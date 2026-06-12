@@ -95,13 +95,23 @@ app.post(
       if (eventType === 'push') {
         const payload = req.body;
         
-        // Dispatch to BullMQ for asynchronous processing
-        const job = await commitQueue.add('github-push', {
-          repository: payload.repository?.full_name,
-          commits: payload.commits,
-          pusher: payload.pusher?.name,
-          ref: payload.ref,
-        });
+        // Dispatch to BullMQ for asynchronous processing with retry configurations
+        const job = await commitQueue.add(
+          'github-push',
+          {
+            repository: payload.repository?.full_name,
+            commits: payload.commits,
+            pusher: payload.pusher?.name,
+            ref: payload.ref,
+          },
+          {
+            attempts: 3,
+            backoff: {
+              type: 'exponential',
+              delay: 1000,
+            },
+          }
+        );
 
         console.log(`[Webhook] Successfully enqueued job ${job.id} for the push event.`);
         res.status(200).json({
