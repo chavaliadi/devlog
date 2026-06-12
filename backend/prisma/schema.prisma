@@ -25,12 +25,14 @@ model Commit {
   id          String   @id @default(uuid())
   userId      String
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  sha         String   @unique
+  sha         String
   repository  String   // owner/repo
   message     String
   diffText    String?  // Optional - holds commit diff if fetched
   commitDate  DateTime
   createdAt   DateTime @default(now())
+
+  @@unique([repository, sha])
 }
 
 model Entry {

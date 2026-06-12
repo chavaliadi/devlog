@@ -94,30 +94,40 @@ app.post(
 
       if (eventType === 'push') {
         const payload = req.body;
-        
-        // Dispatch to BullMQ for asynchronous processing with retry configurations
-        const job = await commitQueue.add(
-          'github-push',
-          {
-            repository: payload.repository?.full_name,
-            commits: payload.commits,
-            pusher: payload.pusher?.name,
-            ref: payload.ref,
-          },
-          {
-            attempts: 3,
-            backoff: {
-              type: 'exponential',
-              delay: 1000,
-            },
-          }
-        );
+        const commits = payload.commits || [];
+        const repository = payload.repository?.full_name;
+        const pusher = payload.pusher?.name;
+        const ref = payload.ref;
 
-        console.log(`[Webhook] Successfully enqueued job ${job.id} for the push event.`);
+        const enqueuedJobIds: string[] = [];
+
+        for (const commit of commits) {
+          const job = await commitQueue.add(
+            'github-commit',
+            {
+              repository,
+              commit,
+              pusher,
+              ref,
+            },
+            {
+              attempts: 3,
+              backoff: {
+                type: 'exponential',
+                delay: 1000,
+              },
+            }
+          );
+          if (job.id) {
+            enqueuedJobIds.push(job.id);
+          }
+        }
+
+        console.log(`[Webhook] Enqueued ${enqueuedJobIds.length} commit jobs for push event on ${repository}.`);
         res.status(200).json({
           status: 'accepted',
-          message: 'Webhook received, job enqueued',
-          jobId: job.id,
+          message: `${enqueuedJobIds.length} commit jobs enqueued`,
+          jobIds: enqueuedJobIds,
         });
         return;
       }
