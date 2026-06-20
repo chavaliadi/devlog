@@ -56,12 +56,18 @@ export const startCommitWorker = () => {
       });
 
       if (!user) {
+        const defaultUsername = process.env.DEFAULT_DEVELOPER_USERNAME || 'chavaliadi';
         console.warn(
-          `[Worker] No matching user found for owner '${owner}' or pusher '${pusher}'. Falling back to default user.`
+          `[Worker] No matching user found for owner '${owner}' or pusher '${pusher}'. Falling back to default user '${defaultUsername}'.`
         );
         user = await prisma.user.findFirst({
-          where: { username: 'chavaliadi' },
+          where: { username: defaultUsername },
         });
+
+        if (!user) {
+          console.warn(`[Worker] User '${defaultUsername}' not found. Falling back to the first user in the database.`);
+          user = await prisma.user.findFirst();
+        }
 
         if (!user) {
           throw new Error('Database contains no users to associate with incoming commits.');
