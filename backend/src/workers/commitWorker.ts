@@ -2,6 +2,7 @@ import { Worker, Job } from 'bullmq';
 import { PrismaClient, Prisma } from '@prisma/client';
 import { redisConnectionConfig } from '../config/redis';
 import { fetchCommitDiff } from '../services/githubService';
+import { decrypt } from '../utils/crypto';
 
 const prisma = new PrismaClient();
 
@@ -78,7 +79,7 @@ export const startCommitWorker = () => {
 
       // Determine the GitHub token to use (prefer OAuth token, fallback to PAT)
       const userToken = user.accessToken && user.accessToken !== 'placeholder_access_token'
-        ? user.accessToken
+        ? decrypt(user.accessToken)
         : undefined;
 
       // 3. Fast check-before-insert (performance optimization)

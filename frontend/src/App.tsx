@@ -5,7 +5,24 @@ import { LogTimeline } from './components/LogTimeline';
 import { LogEditor } from './components/LogEditor';
 import { CommitList } from './components/CommitList';
 import { PublicPortfolio } from './components/PublicPortfolio';
-import { Sparkles, Calendar, RefreshCw, XCircle, CheckCircle2 } from 'lucide-react';
+import { Sparkles, RefreshCw, XCircle, CheckCircle2 } from 'lucide-react';
+
+const Github = ({ className }: { className?: string }) => (
+  <svg
+    viewBox="0 0 24 24"
+    width="20"
+    height="20"
+    stroke="currentColor"
+    strokeWidth="2"
+    fill="none"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+  >
+    <path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4" />
+    <path d="M9 18c-4.51 2-5-2-7-2" />
+  </svg>
+);
 
 interface Entry {
   id: string;
@@ -25,6 +42,7 @@ interface Commit {
 }
 
 interface UserProfile {
+  id: string;
   username: string;
   email: string | null;
   avatarUrl: string | null;
@@ -41,6 +59,7 @@ function App() {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [commits, setCommits] = useState<Commit[]>([]);
   const [user, setUser] = useState<UserProfile | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isCompiling, setIsCompiling] = useState<boolean>(false);
   const [toast, setToast] = useState<Toast | null>(null);
@@ -53,8 +72,29 @@ function App() {
     }, 4000);
   };
 
+  const checkSession = async () => {
+    try {
+      const meRes = await fetch('/api/auth/me');
+      if (meRes.ok) {
+        const meData = await meRes.json();
+        setUser(meData.user);
+        setIsAuthenticated(true);
+        // Load operational dashboard data scope to the authenticated user
+        await fetchData();
+      } else {
+        setIsAuthenticated(false);
+        setUser(null);
+        setIsLoading(false);
+      }
+    } catch (e: any) {
+      console.error('Auth verification failed:', e.message);
+      setIsAuthenticated(false);
+      setUser(null);
+      setIsLoading(false);
+    }
+  };
+
   const fetchData = async () => {
-    setIsLoading(true);
     try {
       // 1. Fetch entries
       const entriesRes = await fetch('/api/entries');
@@ -69,13 +109,6 @@ function App() {
         const commitsData = await commitsRes.json();
         setCommits(commitsData.commits || []);
       }
-
-      // Mock user details based on typical profile info (seeded as chavaliadi)
-      setUser({
-        username: 'chavaliadi',
-        email: 'adithya3218@gmail.com',
-        avatarUrl: 'https://github.com/chavaliadi.png',
-      });
     } catch (e: any) {
       console.error('Failed to fetch data:', e.message);
       showToast('error', 'Failed to communicate with backend database.');
@@ -85,7 +118,7 @@ function App() {
   };
 
   useEffect(() => {
-    fetchData();
+    checkSession();
   }, []);
 
   const handleTriggerSummary = async () => {
@@ -156,6 +189,27 @@ function App() {
     }
   };
 
+  const handleLogout = async () => {
+    try {
+      const res = await fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (res.ok) {
+        setIsAuthenticated(false);
+        setUser(null);
+        setEntries([]);
+        setCommits([]);
+        showToast('success', 'Logged out successfully.');
+      } else {
+        throw new Error('Logout failed on backend.');
+      }
+    } catch (e: any) {
+      console.error(e);
+      showToast('error', 'Failed to logout correctly.');
+    }
+  };
+
   const handleTabChange = (tab: string) => {
     setCurrentTab(tab);
     setSelectedEntryId(null); // Clear selected editor if switching tabs
@@ -194,10 +248,79 @@ function App() {
     });
   };
 
+  // Global loader when checking initial session state
+  if (isAuthenticated === null) {
+    return (
+      <div className="flex min-h-screen bg-[#030712] justify-center items-center">
+        <div className="w-8 h-8 rounded-full border-2 border-indigo-500 border-t-transparent animate-spin" />
+      </div>
+    );
+  }
+
+  // Premium Login Screen if not authenticated
+  if (!isAuthenticated) {
+    return (
+      <div className="flex min-h-screen bg-[#030712] items-center justify-center p-4">
+        {/* Toast Alert */}
+        {toast && (
+          <div className="fixed top-6 right-6 z-50 animate-bounce">
+            <div className={`flex items-center gap-2 px-4 py-3 rounded-2xl border shadow-lg glass-panel ${
+              toast.type === 'success' ? 'border-emerald-500/30 text-emerald-400' : 'border-rose-500/30 text-rose-400'
+            }`}>
+              {toast.type === 'success' ? (
+                <CheckCircle2 className="w-5 h-5" />
+              ) : (
+                <XCircle className="w-5 h-5" />
+              )}
+              <span className="text-sm font-semibold">{toast.message}</span>
+            </div>
+          </div>
+        )}
+        
+        <div className="relative w-full max-w-md">
+          {/* Background glow accent */}
+          <div className="absolute -inset-1 rounded-3xl bg-gradient-to-r from-indigo-500 to-purple-600 opacity-25 blur-2xl filter" />
+          
+          <div className="relative glass-panel p-8 rounded-3xl border border-glass-border flex flex-col items-center text-center">
+            {/* Logo Icon */}
+            <div className="w-14 h-14 rounded-2xl bg-indigo-600 flex items-center justify-center font-extrabold text-white text-2xl shadow-lg shadow-indigo-500/20 mb-6">
+              D
+            </div>
+            
+            <h2 className="text-2xl font-extrabold text-white tracking-tight bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent">
+              Welcome to Devlog
+            </h2>
+            
+            <p className="text-xs text-gray-400 mt-2 mb-8 leading-relaxed max-w-xs">
+              Directly convert your daily Git commit history and code diffs into clean, recruiters-oriented portfolio logs.
+            </p>
+
+            <a
+              href="/api/auth/github"
+              className="w-full bg-[#1f2937] hover:bg-gray-800/80 text-white font-semibold py-3 px-6 rounded-xl flex items-center justify-center gap-3 border border-gray-700/50 hover:border-gray-600 transition-all duration-200 transform hover:scale-[1.01] cursor-pointer shadow-md"
+            >
+              <Github className="w-5 h-5 text-gray-100" />
+              <span>Connect with GitHub</span>
+            </a>
+            
+            <div className="mt-8 text-[11px] text-gray-500 max-w-[280px]">
+              Access token usage is limited to repository log read actions. Credentials are fully encrypted.
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex min-h-screen bg-[#030712]">
       {/* Sidebar Navigation */}
-      <Sidebar currentTab={currentTab} onTabChange={handleTabChange} />
+      <Sidebar
+        currentTab={currentTab}
+        onTabChange={handleTabChange}
+        user={user}
+        onLogout={handleLogout}
+      />
 
       {/* Main Panel Content Area */}
       <main className="flex-1 ml-64 p-8 relative">
@@ -306,3 +429,4 @@ function App() {
 }
 
 export default App;
+

@@ -1,12 +1,18 @@
 import React from 'react';
-import { LayoutDashboard, GitCommit, BookOpen, Settings } from 'lucide-react';
+import { LayoutDashboard, GitCommit, BookOpen, LogOut } from 'lucide-react';
 
 interface SidebarProps {
   currentTab: string;
   onTabChange: (tab: string) => void;
+  user?: {
+    username: string;
+    avatarUrl: string | null;
+    email: string | null;
+  } | null;
+  onLogout?: () => void;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onTabChange }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onTabChange, user, onLogout }) => {
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'commits', label: 'Commits Feed', icon: GitCommit },
@@ -49,11 +55,46 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onTabChange }) => 
         </nav>
       </div>
 
-      {/* Footer Info */}
-      <div className="border-t border-glass-border pt-4 px-3 text-xs text-gray-500">
-        <p className="font-semibold text-gray-400">Devlog MVP v1.0</p>
-        <p className="mt-1">Auto-summarizing daily commits using Groq AI.</p>
+      {/* Footer Info & Logout */}
+      <div>
+        {user && (
+          <div className="border-t border-glass-border pt-4 px-2 mb-4 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              {user.avatarUrl ? (
+                <img
+                  src={user.avatarUrl}
+                  alt={user.username}
+                  className="w-8 h-8 rounded-full border border-glass-border"
+                />
+              ) : (
+                <div className="w-8 h-8 rounded-full bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 flex items-center justify-center text-xs font-bold">
+                  {user.username.charAt(0).toUpperCase()}
+                </div>
+              )}
+              <div className="flex flex-col min-w-0">
+                <span className="text-xs font-bold text-gray-200 truncate">{user.username}</span>
+                <span className="text-[10px] text-gray-500 truncate">GitHub Connected</span>
+              </div>
+            </div>
+
+            {onLogout && (
+              <button
+                onClick={onLogout}
+                className="p-1.5 rounded-lg text-gray-400 hover:text-rose-400 hover:bg-rose-500/10 transition-all duration-200 cursor-pointer"
+                title="Sign Out"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        )}
+
+        <div className="border-t border-glass-border pt-4 px-3 text-xs text-gray-500">
+          <p className="font-semibold text-gray-400">Devlog MVP v1.0</p>
+          <p className="mt-1">Auto-summarizing daily commits using Groq AI.</p>
+        </div>
       </div>
     </aside>
   );
 };
+

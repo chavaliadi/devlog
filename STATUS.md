@@ -1,6 +1,6 @@
-# Devlog Project Status — Phase 1 & 2 Completed
+# Devlog Project Status — Phase 1, 2 & 3 Completed
 
-This file outlines the current completed work, the running configuration, and the tasks remaining for the next phase.
+This file outlines the current completed work and the running configuration.
 
 ---
 
@@ -41,24 +41,15 @@ This file outlines the current completed work, the running configuration, and th
   - Ingested commits historical viewer feed.
   - Recruiter Portfolio reader view for showcasing published entries.
 
+### 6. GitHub OAuth Login & Route Security (Phase 3)
+- **API Redirection**: `/api/auth/github` backend redirect route to GitHub's authorization gateway.
+- **Token Exchange & Encryption**: Callback route trades code for access token, encrypts the access token using `aes-256-gcm`, and upserts users in the database.
+- **Session Management**: Cookie-based session tracking using signed cookies with `cookie-session` middleware.
+- **Route Security Gating**: Gated REST APIs (`/api/entries`, `/api/commits`, etc.) with `requireAuth` middleware scoping queries to the session user.
+- **CORS Locks**: Configured specific origin limits with credentials enabled.
+- **Frontend Auth Gating**: Gated page routing with initial `/api/auth/me` checks, rendering a premium GitHub authentication login gate screen, and a "Sign Out" option in the Sidebar.
+
 ---
 
-## ❌ What is Left (Next Phase)
-
-### 1. GitHub OAuth Login Flow
-- **API Redirection**: Add `/api/auth/github` backend redirect route to GitHub's authorization gateway.
-- **Token Exchange**: Add `/api/auth/github/callback` callback route to trade authorization codes for user access tokens, retrieve GitHub details (avatar, username, email), and upsert users.
-- **Session Management**: Add signed cookie-based session management using `cookie-session` in the backend.
-
-### 2. Route Security Gating
-- Replace the hardcoded `chavaliadi` defaults on the REST APIs.
-- Protect all endpoints (`GET /api/entries`, `/api/commits`, etc.) with auth middleware that parses the session user ID, returning `401 Unauthorized` for unauthenticated queries.
-
-### 3. Frontend Gating & Logout
-- Intercept page routing to check `/api/auth/me` on startup.
-- Redirect to a premium Login page with a "Connect with GitHub" button if unauthenticated.
-- Wire up a "Sign Out" button to delete cookies.
-
-### 4. Optional Improvements
-- **Credentials Encryption**: Encrypt the GitHub user `accessToken` stored in PostgreSQL using `aes-256-gcm` keys.
-- **CORS Lock**: Lock CORS origins to the specific dev port in config.
+## ❌ What is Left
+- None! All planned phases (Phases 1, 2, and 3) are fully completed, verified, and operational.
