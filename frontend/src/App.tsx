@@ -54,6 +54,14 @@ interface Toast {
 }
 
 function App() {
+  const getPublicUsernameFromHash = () => {
+    const hash = window.location.hash;
+    if (hash.startsWith('#/portfolio/')) {
+      return hash.substring('#/portfolio/'.length).trim();
+    }
+    return null;
+  };
+
   const [currentTab, setCurrentTab] = useState<string>('dashboard');
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -62,7 +70,27 @@ function App() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isCompiling, setIsCompiling] = useState<boolean>(false);
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [toast, setToast] = useState<Toast | null>(null);
+
+  // Guest Portfolio State
+  const [publicData, setPublicData] = useState<{
+    profile: { username: string; avatarUrl: string | null };
+    stats: {
+      totalCommits: number;
+      totalRepositories: number;
+      topRepositories: string[];
+      activeDays: number;
+      currentStreak: number;
+    };
+    recentActivity: {
+      sha: string;
+      repository: string;
+      message: string;
+      date: string;
+    }[];
+    entries: Entry[];
+  } | null>(null);
 
   // Automatically show toast and hide after 4 seconds
   const showToast = (type: 'success' | 'error', message: string) => {
@@ -72,14 +100,41 @@ function App() {
     }, 4000);
   };
 
+  const fetchPublicPortfolio = async (username: string) => {
+    setIsLoading(true);
+    try {
+      const res = await fetch(`/api/public/entries/${username}`);
+      if (res.ok) {
+        const data = await res.json();
+        setPublicData(data);
+        setIsAuthenticated(false); // Bypass Connect with GitHub screen
+      } else {
+        setPublicData(null);
+        showToast('error', `Public portfolio for '${username}' not found.`);
+        setIsAuthenticated(false);
+      }
+    } catch (e: any) {
+      console.error('Failed to fetch public portfolio:', e.message);
+      setPublicData(null);
+      setIsAuthenticated(false);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const checkSession = async () => {
+    const publicUser = getPublicUsernameFromHash();
+    if (publicUser) {
+      await fetchPublicPortfolio(publicUser);
+      return;
+    }
+
     try {
       const meRes = await fetch('/api/auth/me');
       if (meRes.ok) {
         const meData = await meRes.json();
         setUser(meData.user);
         setIsAuthenticated(true);
-        // Load operational dashboard data scope to the authenticated user
         await fetchData();
       } else {
         setIsAuthenticated(false);
@@ -119,6 +174,13 @@ function App() {
 
   useEffect(() => {
     checkSession();
+
+    const handleHashChange = () => {
+      checkSession();
+    };
+
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
   const handleTriggerSummary = async () => {
@@ -147,6 +209,27 @@ function App() {
       showToast('error', e.message || 'No commits found for today or API key invalid.');
     } finally {
       setIsCompiling(false);
+    }
+  };
+
+  const handleSyncCommits = async () => {
+    setIsSyncing(true);
+    showToast('success', 'Syncing your repositories and commits from GitHub...');
+    try {
+      const res = await fetch('/api/commits/sync', {
+        method: 'POST',
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to sync commits');
+      }
+      showToast('success', data.message || 'Sync completed successfully!');
+      await fetchData(); // Refresh local list of commits
+    } catch (e: any) {
+      console.error(e);
+      showToast('error', e.message || 'Failed to sync commits from GitHub.');
+    } finally {
+      setIsSyncing(false);
     }
   };
 
@@ -248,11 +331,54 @@ function App() {
     });
   };
 
+  const isGuestView = getPublicUsernameFromHash() !== null;
+
   // Global loader when checking initial session state
   if (isAuthenticated === null) {
     return (
       <div className="flex min-h-screen bg-[#030712] justify-center items-center">
         <div className="w-8 h-8 rounded-full border-2 border-indigo-500 border-t-transparent animate-spin" />
+      </div>
+    );
+  }
+
+  // Render Guest View directly (bypassing the login authentication screen)
+  if (isGuestView) {
+    return (
+      <div className="min-h-screen bg-[#030712] p-8">
+        {toast && (
+          <div className="fixed top-6 right-6 z-50 animate-bounce">
+            <div className={`flex items-center gap-2 px-4 py-3 rounded-2xl border shadow-lg glass-panel ${
+              toast.type === 'success' ? 'border-emerald-500/30 text-emerald-400' : 'border-rose-500/30 text-rose-400'
+            }`}>
+              {toast.type === 'success' ? (
+                <CheckCircle2 className="w-5 h-5" />
+              ) : (
+                <XCircle className="w-5 h-5" />
+              )}
+              <span className="text-sm font-semibold">{toast.message}</span>
+            </div>
+          </div>
+        )}
+
+        {isLoading ? (
+          <div className="flex justify-center items-center h-[60vh]">
+            <div className="w-8 h-8 rounded-full border-2 border-indigo-500 border-t-transparent animate-spin" />
+          </div>
+        ) : publicData ? (
+          <PublicPortfolio
+            entries={publicData.entries}
+            profile={publicData.profile}
+            stats={publicData.stats}
+            recentActivity={publicData.recentActivity}
+            isGuest={true}
+          />
+        ) : (
+          <div className="max-w-md mx-auto text-center py-12 glass-panel rounded-3xl border border-glass-border p-8 mt-20">
+            <h2 className="text-xl font-bold text-white mb-2">Portfolio Not Found</h2>
+            <p className="text-xs text-gray-400">The developer log portfolio you requested does not exist or is private.</p>
+          </div>
+        )}
       </div>
     );
   }
@@ -376,6 +502,15 @@ function App() {
             >
               <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
             </button>
+
+            <button
+              onClick={handleSyncCommits}
+              disabled={isSyncing || isLoading}
+              className="bg-[#1f2937] hover:bg-gray-800 text-white px-4 py-2.5 rounded-xl text-xs font-semibold transition-all border border-gray-700/50 hover:border-gray-600 cursor-pointer flex items-center gap-1.5 shadow-md"
+            >
+              <RefreshCw className={`w-4 h-4 text-gray-300 ${isSyncing ? 'animate-spin' : ''}`} />
+              Sync GitHub Commits
+            </button>
             
             <button
               onClick={handleTriggerSummary}
@@ -420,8 +555,25 @@ function App() {
           /* Commits Feed Tab View */
           <CommitList commits={commits} />
         ) : (
-          /* Public Share Mode Tab View */
-          <PublicPortfolio entries={entries} user={user} />
+          /* Public Share Mode Tab View (Self preview) */
+          <PublicPortfolio
+            entries={entries}
+            profile={user}
+            stats={{
+              totalCommits,
+              totalRepositories: Array.from(new Set(commits.map(c => c.repository))).length,
+              topRepositories: Array.from(new Set(commits.map(c => c.repository))).slice(0, 3),
+              activeDays: Array.from(new Set(commits.map(c => c.commitDate.split('T')[0]))).length,
+              currentStreak: 0
+            }}
+            recentActivity={commits.slice(0, 5).map(c => ({
+              sha: c.sha.substring(0, 8),
+              repository: c.repository,
+              message: c.message,
+              date: c.commitDate
+            }))}
+            isGuest={false}
+          />
         )}
       </main>
     </div>

@@ -9,7 +9,8 @@ import { verifyGitHubWebhook, AuthenticatedRequest } from './middleware/verifyWe
 import { initCronJobs } from './config/cron';
 import { generateDailySummary } from './services/summaryService';
 import { requireAuth, AuthRequest } from './middleware/auth';
-import { encrypt } from './utils/crypto';
+import { encrypt, decrypt } from './utils/crypto';
+import { fetchCommitDiff } from './services/githubService';
 
 dotenv.config();
 
@@ -215,7 +216,8 @@ app.get('/api/auth/github/callback', async (req: any, res) => {
     const accessToken = tokenData.access_token;
 
     if (!accessToken) {
-      throw new Error('Access token not returned from GitHub OAuth gateway.');
+      const errorMsg = tokenData.error_description || tokenData.error || JSON.stringify(tokenData);
+      throw new Error(`Access token not returned from GitHub OAuth gateway. Reason: ${errorMsg}`);
     }
 
     // Retrieve user profile information
@@ -260,24 +262,39 @@ app.get('/api/auth/github/callback', async (req: any, res) => {
     // Encrypt token before DB insertion
     const encryptedToken = encrypt(accessToken);
 
-    // Upsert User profile
-    const user = await prisma.user.upsert({
-      where: { githubId },
-      update: {
-        username,
-        email,
-        avatarUrl,
-        accessToken: encryptedToken,
-      },
-      create: {
-        githubId,
-        username,
-        email,
-        avatarUrl,
-        accessToken: encryptedToken,
-        timezone: 'Asia/Kolkata', // Default timezone configuration
-      },
+    // Look up user by githubId or username to handle seed data transitions safely
+    let user = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { githubId },
+          { username }
+        ]
+      }
     });
+
+    if (user) {
+      user = await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          githubId, // Update placeholder/mock ID if it was seeded
+          username,
+          email,
+          avatarUrl,
+          accessToken: encryptedToken,
+        },
+      });
+    } else {
+      user = await prisma.user.create({
+        data: {
+          githubId,
+          username,
+          email,
+          avatarUrl,
+          accessToken: encryptedToken,
+          timezone: 'Asia/Kolkata', // Default timezone configuration
+        },
+      });
+    }
 
     // Establish cookie session
     req.session.userId = user.id;
@@ -314,6 +331,156 @@ app.get('/api/auth/me', requireAuth as express.RequestHandler, (req: AuthRequest
 app.post('/api/auth/logout', (req: any, res) => {
   req.session = null;
   res.status(200).json({ success: true, message: 'Logged out successfully.' });
+});
+
+// Helper to convert date to local string in a timezone (YYYY-MM-DD)
+const formatDateInTimezone = (date: Date, timezone: string): string => {
+  try {
+    const formatted = date.toLocaleDateString('en-US', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    const [m, d, y] = formatted.split('/');
+    return `${y}-${m}-${d}`;
+  } catch (e) {
+    return date.toISOString().split('T')[0];
+  }
+};
+
+// 5. GET /api/public/entries/:username - Fetch recruiter guest portfolio profile & statistics
+app.get('/api/public/entries/:username', async (req, res) => {
+  try {
+    const { username } = req.params;
+
+    const user = await prisma.user.findUnique({
+      where: { username },
+    });
+
+    if (!user) {
+      res.status(404).json({ success: false, error: `User '${username}' not found.` });
+      return;
+    }
+
+    // 1. Fetch entries (Published only)
+    const entries = await prisma.entry.findMany({
+      where: {
+        userId: user.id,
+        status: 'published',
+      },
+      orderBy: { date: 'desc' },
+    });
+
+    // 2. Fetch all commits to compile stats
+    const commits = await prisma.commit.findMany({
+      where: { userId: user.id },
+      select: { commitDate: true },
+      orderBy: { commitDate: 'desc' },
+    });
+
+    const totalCommits = commits.length;
+
+    // 3. Group commits by repo to select top 3 active repositories
+    const repoGroups = await prisma.commit.groupBy({
+      by: ['repository'],
+      where: { userId: user.id },
+      _count: {
+        id: true,
+      },
+      orderBy: {
+        _count: {
+          id: 'desc',
+        },
+      },
+    });
+
+    const totalRepositories = repoGroups.length;
+    const topRepositories = repoGroups.slice(0, 3).map((rg) => rg.repository);
+
+    // 4. Calculate Active Days & Streak
+    const timezone = user.timezone || 'Asia/Kolkata';
+    const localDates = Array.from(
+      new Set(commits.map((c) => formatDateInTimezone(c.commitDate, timezone)))
+    ).sort((a, b) => b.localeCompare(a));
+
+    const activeDays = localDates.length;
+
+    let currentStreak = 0;
+    if (localDates.length > 0) {
+      const todayStr = formatDateInTimezone(new Date(), timezone);
+      
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const yesterdayStr = formatDateInTimezone(yesterday, timezone);
+
+      const latestLocal = localDates[0];
+      const hasCommitToday = latestLocal === todayStr;
+      const hasCommitYesterday = latestLocal === yesterdayStr;
+
+      if (hasCommitToday || hasCommitYesterday) {
+        currentStreak = 1;
+        let prevDate = new Date(latestLocal + 'T00:00:00Z');
+
+        for (let i = 1; i < localDates.length; i++) {
+          const currentDate = new Date(localDates[i] + 'T00:00:00Z');
+          const diffTime = Math.abs(prevDate.getTime() - currentDate.getTime());
+          const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
+
+          if (diffDays === 1) {
+            currentStreak++;
+            prevDate = currentDate;
+          } else {
+            break;
+          }
+        }
+      }
+    }
+
+    // 5. Fetch and clean latest 5 commits for Recent Activity feed
+    const recentCommits = await prisma.commit.findMany({
+      where: { userId: user.id },
+      orderBy: { commitDate: 'desc' },
+      take: 5,
+    });
+
+    const recentActivity = recentCommits.map((commit) => {
+      let message = commit.message.trim();
+      if (message.length > 0) {
+        message = message.charAt(0).toUpperCase() + message.slice(1);
+      }
+      if (message.length > 100) {
+        message = message.substring(0, 97) + '...';
+      }
+      return {
+        sha: commit.sha.substring(0, 8),
+        repository: commit.repository,
+        message,
+        date: commit.commitDate.toISOString(),
+      };
+    });
+
+    // 6. Return structured unauthenticated payload (completely excluding private email and token details)
+    res.status(200).json({
+      success: true,
+      profile: {
+        username: user.username,
+        avatarUrl: user.avatarUrl,
+      },
+      stats: {
+        totalCommits,
+        totalRepositories,
+        topRepositories,
+        activeDays,
+        currentStreak,
+      },
+      recentActivity,
+      entries,
+    });
+  } catch (error: any) {
+    console.error('[API] Public portfolio fetch failed:', error.message);
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
 });
 
 // ==========================================
@@ -403,6 +570,108 @@ app.get('/api/commits', requireAuth as express.RequestHandler, async (req: AuthR
     res.status(200).json({ success: true, commits });
   } catch (error: any) {
     console.error('[API] Failed to fetch commits:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 4b. POST /api/commits/sync - Fetch recent repos and commits from GitHub and ingest them
+app.post('/api/commits/sync', requireAuth as express.RequestHandler, async (req: AuthRequest, res) => {
+  try {
+    const user = req.user!;
+    if (!user.accessToken || user.accessToken === 'placeholder_access_token') {
+      res.status(400).json({ success: false, error: 'GitHub account not connected or missing token.' });
+      return;
+    }
+
+    const token = decrypt(user.accessToken);
+
+    // Fetch user's public and private repositories (up to 8 repos)
+    const reposResponse = await fetch('https://api.github.com/user/repos?sort=updated&per_page=8', {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'User-Agent': 'Devlog-App',
+        'Accept': 'application/vnd.github+json',
+      },
+    });
+
+    if (!reposResponse.ok) {
+      throw new Error(`GitHub repos API returned ${reposResponse.status}`);
+    }
+
+    const repos = (await reposResponse.json()) as any[];
+    let syncedCommitsCount = 0;
+    
+    // Process repos sequentially to avoid rate limiting or slamming the DB
+    for (const repo of repos) {
+      const repoFullName = repo.full_name; // e.g. "owner/repo"
+      const [repoOwner, repoName] = repoFullName.split('/');
+
+      // Fetch recent commits for this user from this repo (up to 5 commits per repo)
+      const commitsResponse = await fetch(
+        `https://api.github.com/repos/${repoFullName}/commits?author=${user.username}&per_page=5`,
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'User-Agent': 'Devlog-App',
+            'Accept': 'application/vnd.github+json',
+          },
+        }
+      );
+
+      if (!commitsResponse.ok) {
+        console.warn(`[API Sync] Failed to fetch commits for ${repoFullName}:`, commitsResponse.statusText);
+        continue;
+      }
+
+      const githubCommits = (await commitsResponse.json()) as any[];
+      if (!Array.isArray(githubCommits)) continue;
+
+      for (const commitObj of githubCommits) {
+        const sha = commitObj.sha;
+
+        // Check if commit already exists in database
+        const existing = await prisma.commit.findUnique({
+          where: {
+            repository_sha: {
+              repository: repoFullName,
+              sha,
+            },
+          },
+        });
+
+        if (existing) {
+          continue; // Already ingested
+        }
+
+        try {
+          // Fetch detailed commit diff using our helper service
+          const details = await fetchCommitDiff(repoOwner, repoName, sha, token);
+
+          // Save commit to database
+          await prisma.commit.create({
+            data: {
+              userId: user.id,
+              sha,
+              repository: repoFullName,
+              message: details.message,
+              diffText: details.diffText,
+              commitDate: details.commitDate,
+            },
+          });
+          syncedCommitsCount++;
+        } catch (err: any) {
+          console.error(`[API Sync] Failed to ingest commit ${sha}:`, err.message);
+        }
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `Sync completed. Ingested ${syncedCommitsCount} new commits.`,
+      count: syncedCommitsCount,
+    });
+  } catch (error: any) {
+    console.error('[API Sync] Commit sync failed:', error.message);
     res.status(500).json({ success: false, error: error.message });
   }
 });

@@ -49,7 +49,14 @@ This file outlines the current completed work and the running configuration.
 - **CORS Locks**: Configured specific origin limits with credentials enabled.
 - **Frontend Auth Gating**: Gated page routing with initial `/api/auth/me` checks, rendering a premium GitHub authentication login gate screen, and a "Sign Out" option in the Sidebar.
 
+### 7. Guest Recruiter gateway (Phase 4)
+- **Public API**: `GET /api/public/entries/:username` returning public profile, cleaned commits feed, and stats.
+- **Routing Bypass**: Bypasses login gates on URL hashes like `#/portfolio/:username`.
+- **Metrics Dashboard**: Renders total commits, monitored repos, active days, and streak indicators.
+- **Reading Overlay Modal**: Seamless, glassmorphic reading overlay modal when clicking on any journal entry.
+
 ---
 
 ## ❌ What is Left
-- None! All planned phases (Phases 1, 2, and 3) are fully completed, verified, and operational.
+- None! All planned phases (Phases 1, 2, 3, and 4) are fully completed, verified, and operational.
+
