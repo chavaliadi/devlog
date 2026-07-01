@@ -4,10 +4,10 @@ import dotenv from 'dotenv';
 import cookieSession from 'cookie-session';
 import { PrismaClient } from '@prisma/client';
 import { commitQueue } from './queues/commitQueue';
-import { startCommitWorker } from './workers/commitWorker';
+import { startCommitWorker, pauseCommitWorker, resumeCommitWorker, isCommitWorkerPaused } from './workers/commitWorker';
 import { verifyGitHubWebhook, AuthenticatedRequest } from './middleware/verifyWebhook';
 import { initCronJobs, lastCronRun } from './config/cron';
-import { generateDailySummary } from './services/summaryService';
+import { generateDailySummary, getCommitsForDate } from './services/summaryService';
 import { requireAuth, AuthRequest } from './middleware/auth';
 import { encrypt, decrypt } from './utils/crypto';
 import { fetchCommitDiff } from './services/githubService';
@@ -649,6 +649,8 @@ app.get('/api/health', requireAuth as express.RequestHandler, async (req: AuthRe
 
     // 4. Ingestion workers status (Active checks)
     const activeWorkers = await commitQueue.getWorkers();
+    const isPaused = await isCommitWorkerPaused();
+    const workerStatus = isPaused ? 'paused' : 'running';
 
     res.status(200).json({
       success: true,
@@ -667,6 +669,7 @@ app.get('/api/health', requireAuth as express.RequestHandler, async (req: AuthRe
         completed: counts.completed || 0,
         failed: counts.failed || 0,
         totalWorkers: activeWorkers.length,
+        workerStatus,
       },
       cron: {
         timezone: 'Asia/Kolkata', // default timezone
@@ -681,6 +684,31 @@ app.get('/api/health', requireAuth as express.RequestHandler, async (req: AuthRe
       status: 'unhealthy',
       error: error.message,
     });
+  }
+});
+
+// Outage Simulation trigger: toggles pause/resume on the active BullMQ worker
+app.post('/api/health/toggle-worker', requireAuth as express.RequestHandler, async (req: AuthRequest, res) => {
+  try {
+    const isPaused = await isCommitWorkerPaused();
+    if (isPaused) {
+      await resumeCommitWorker();
+      res.status(200).json({
+        success: true,
+        workerStatus: 'running',
+        message: 'BullMQ worker resumed successfully. Processing queue commits.',
+      });
+    } else {
+      await pauseCommitWorker();
+      res.status(200).json({
+        success: true,
+        workerStatus: 'paused',
+        message: 'BullMQ worker paused successfully. Outage simulated.',
+      });
+    }
+  } catch (error: any) {
+    console.error('[API Health Outage] Failed to toggle worker state:', error.message);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -986,7 +1014,36 @@ app.post('/api/entries/:id/resume-bullets', requireAuth as express.RequestHandle
       return;
     }
 
-    const bullets = await generateResumeBullets(entry.content);
+    // 1. Query all commits matching the entry date & user timezone
+    const targetDateStr = formatDateInTimezone(entry.date, req.user!.timezone);
+    const commits = await getCommitsForDate(req.user!.id, targetDateStr, req.user!.timezone);
+
+    // 2. Collect unique filenames to prevent double-counting across commits
+    const uniqueFiles = new Set<string>();
+    commits.forEach((commit) => {
+      if (commit.diffText) {
+        const lines = commit.diffText.split('\n');
+        lines.forEach((line) => {
+          if (line.startsWith('File: ')) {
+            // Extract filename from "File: filename (status)" format
+            const namePart = line.replace('File: ', '').split(' (')[0];
+            if (namePart) {
+              uniqueFiles.add(namePart.trim());
+            }
+          }
+        });
+      }
+    });
+
+    const uniqueRepos = Array.from(new Set(commits.map(c => c.repository)));
+
+    const stats = {
+      totalCommits: commits.length,
+      uniqueRepos,
+      totalFilesChanged: uniqueFiles.size,
+    };
+
+    const bullets = await generateResumeBullets(entry.content, stats);
 
     res.status(200).json({
       success: true,

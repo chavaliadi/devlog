@@ -67,6 +67,36 @@ async function runTest() {
     },
   });
 
+  // Ensure repository is whitelisted in DB so webhook ingestion accepts it
+  const defaultUsername = process.env.DEFAULT_DEVELOPER_USERNAME || 'chavaliadi';
+  let testUser = await prisma.user.findFirst({
+    where: { username: defaultUsername },
+  });
+  if (!testUser) {
+    testUser = await prisma.user.findFirst();
+  }
+  if (!testUser) {
+    throw new Error('No user profile found in DB to associate test repo.');
+  }
+
+  console.log(`Ensuring test repository ${repository} is tracked in database...`);
+  await prisma.repository.upsert({
+    where: {
+      userId_fullName: {
+        userId: testUser.id,
+        fullName: repository,
+      },
+    },
+    update: {
+      isTracked: true,
+    },
+    create: {
+      userId: testUser.id,
+      fullName: repository,
+      isTracked: true,
+    },
+  });
+
   // 4. Calculate HMAC signature
   const bodyString = JSON.stringify(webhookPayload);
   const hmac = crypto.createHmac('sha256', WEBHOOK_SECRET);

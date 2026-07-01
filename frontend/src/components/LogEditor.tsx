@@ -100,7 +100,7 @@ export const LogEditor: React.FC<LogEditorProps> = ({
   const [status, setStatus] = useState(entry.status);
   const [isSaving, setIsSaving] = useState(false);
   const [activeRightTab, setActiveRightTab] = useState<'preview' | 'commits'>('preview');
-  const [selectedCommitDiff, setSelectedCommitDiff] = useState<string | null>(null);
+  const [selectedCommit, setSelectedCommit] = useState<Commit | null>(null);
 
   // Resume Bullets State
   const [isGeneratingBullets, setIsGeneratingBullets] = useState(false);
@@ -264,7 +264,7 @@ export const LogEditor: React.FC<LogEditorProps> = ({
           <div className="flex border-b border-glass-border px-4 py-2 bg-gray-900/20 justify-between items-center shrink-0">
             <div className="flex gap-2">
               <button
-                onClick={() => { setActiveRightTab('preview'); setSelectedCommitDiff(null); }}
+                onClick={() => { setActiveRightTab('preview'); setSelectedCommit(null); }}
                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
                   activeRightTab === 'preview'
                     ? 'bg-gray-800 text-white'
@@ -286,9 +286,9 @@ export const LogEditor: React.FC<LogEditorProps> = ({
                 Seeded Commits ({commits.length})
               </button>
             </div>
-            {selectedCommitDiff && (
+            {selectedCommit && (
               <button
-                onClick={() => setSelectedCommitDiff(null)}
+                onClick={() => setSelectedCommit(null)}
                 className="text-[10px] text-indigo-400 hover:underline"
               >
                 ← Back to lists
@@ -305,9 +305,17 @@ export const LogEditor: React.FC<LogEditorProps> = ({
               />
             ) : (
               // Commits list or Specific diff details
-              selectedCommitDiff ? (
-                <div className="font-mono text-xs text-gray-300 whitespace-pre bg-gray-950/80 p-4 rounded-xl border border-glass-border">
-                  {selectedCommitDiff}
+              selectedCommit ? (
+                <div className="flex flex-col gap-3 min-h-0">
+                  {selectedCommit.aiSummary && (
+                    <div className="bg-indigo-600/5 border border-indigo-500/10 p-3 rounded-xl text-xs text-indigo-300 italic flex flex-col gap-1 shrink-0 select-text">
+                      <span className="text-[9px] uppercase tracking-wider text-indigo-400 font-bold not-italic">AI Summary</span>
+                      "{selectedCommit.aiSummary}"
+                    </div>
+                  )}
+                  <div className="font-mono text-xs text-gray-300 whitespace-pre bg-gray-950/80 p-4 rounded-xl border border-glass-border overflow-x-auto select-text">
+                    {selectedCommit.diffText}
+                  </div>
                 </div>
               ) : (
                 <div className="space-y-4">
@@ -319,7 +327,7 @@ export const LogEditor: React.FC<LogEditorProps> = ({
                     commits.map((commit) => (
                       <div
                         key={commit.id}
-                        onClick={() => commit.diffText && setSelectedCommitDiff(commit.diffText)}
+                        onClick={() => commit.diffText && setSelectedCommit(commit)}
                         className={`p-4 rounded-xl border bg-gray-800/20 border-glass-border flex flex-col gap-2 transition-all ${
                           commit.diffText ? 'hover:border-indigo-500/20 cursor-pointer hover:bg-gray-800/40' : ''
                         }`}

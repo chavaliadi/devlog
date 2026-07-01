@@ -7,6 +7,8 @@ import { summarizeCommit } from '../services/aiService';
 
 const prisma = new PrismaClient();
 
+export let workerInstance: Worker | null = null;
+
 interface WebhookCommit {
   id: string; // SHA
   message: string;
@@ -26,7 +28,12 @@ interface WebhookJobData {
 }
 
 export const startCommitWorker = () => {
-  const worker = new Worker(
+  if (workerInstance) {
+    console.log('[Worker] Worker instance is already running.');
+    return workerInstance;
+  }
+
+  workerInstance = new Worker(
     'commit-queue',
     async (job: Job<WebhookJobData>) => {
       console.log(`[Worker] Starting job ${job.id} of type ${job.name}...`);
@@ -156,18 +163,39 @@ export const startCommitWorker = () => {
     }
   );
 
-  worker.on('active', (job) => {
+  workerInstance.on('active', (job) => {
     console.log(`[Worker] Job ${job.id} is now active.`);
   });
 
-  worker.on('completed', (job, result) => {
+  workerInstance.on('completed', (job, result) => {
     console.log(`[Worker] Job ${job.id} completed successfully. Result:`, result);
   });
 
-  worker.on('failed', (job, err) => {
+  workerInstance.on('failed', (job, err) => {
     console.error(`[Worker] Job ${job?.id} failed with error:`, err.message);
   });
 
   console.log('[Worker] BullMQ commit-processing worker initialized and listening...');
-  return worker;
+  return workerInstance;
+};
+
+export const pauseCommitWorker = async () => {
+  if (workerInstance) {
+    await workerInstance.pause(true); // pause locally
+    console.log('[Worker] Worker paused successfully.');
+  }
+};
+
+export const resumeCommitWorker = async () => {
+  if (workerInstance) {
+    await workerInstance.resume();
+    console.log('[Worker] Worker resumed successfully.');
+  }
+};
+
+export const isCommitWorkerPaused = async (): Promise<boolean> => {
+  if (workerInstance) {
+    return await workerInstance.isPaused();
+  }
+  return true;
 };

@@ -18,6 +18,7 @@ interface HealthData {
     completed: number;
     failed: number;
     totalWorkers: number;
+    workerStatus: string;
   };
   cron: {
     timezone: string;
@@ -32,6 +33,25 @@ export const HealthDashboard: React.FC = () => {
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastRefreshed, setLastRefreshed] = useState<Date>(new Date());
+  const [isTogglingWorker, setIsTogglingWorker] = useState(false);
+
+  const handleToggleWorker = async () => {
+    setIsTogglingWorker(true);
+    try {
+      const res = await fetch('/api/health/toggle-worker', {
+        method: 'POST',
+      });
+      if (res.ok) {
+        await fetchHealth();
+      } else {
+        setError('Failed to toggle worker state.');
+      }
+    } catch (e) {
+      setError('Connection failure calling worker control gateway.');
+    } finally {
+      setIsTogglingWorker(false);
+    }
+  };
 
   const fetchHealth = async () => {
     try {
@@ -85,6 +105,27 @@ export const HealthDashboard: React.FC = () => {
           </p>
         </div>
         <div className="flex items-center gap-3 self-start sm:self-center">
+          {/* Outage Simulator Button */}
+          {data && (
+            <button
+              onClick={handleToggleWorker}
+              disabled={isTogglingWorker}
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold border active:scale-95 disabled:opacity-50 transition-all duration-200 cursor-pointer ${
+                data.queue.workerStatus === 'running'
+                  ? 'bg-rose-500/10 text-rose-400 border-rose-500/20 hover:bg-rose-500/20'
+                  : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20'
+              }`}
+            >
+              <Activity className="w-3.5 h-3.5" />
+              {isTogglingWorker 
+                ? 'Toggling...' 
+                : data.queue.workerStatus === 'running' 
+                  ? 'Simulate Worker Outage' 
+                  : 'Resume Worker Service'
+              }
+            </button>
+          )}
+
           {/* Auto Refresh Toggle */}
           <button
             onClick={toggleAutoRefresh}
@@ -152,17 +193,27 @@ export const HealthDashboard: React.FC = () => {
             </div>
 
             {/* BullMQ Worker Card */}
-            <div className="glass-panel p-5 rounded-2xl border border-glass-border flex items-start gap-4">
-              <div className="w-10 h-10 rounded-xl bg-indigo-600/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center">
+            <div className={`glass-panel p-5 rounded-2xl border flex items-start gap-4 transition-all ${
+              data.queue.workerStatus === 'running' 
+                ? 'border-glass-border' 
+                : 'border-rose-500/30 bg-rose-950/5'
+            }`}>
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center border transition-all ${
+                data.queue.workerStatus === 'running'
+                  ? 'bg-indigo-600/10 text-indigo-400 border-indigo-500/20'
+                  : 'bg-rose-500/10 text-rose-400 border-rose-500/20 animate-pulse'
+              }`}>
                 <Users className="w-5 h-5" />
               </div>
               <div className="flex-1 min-w-0">
-                <span className="text-gray-400 text-xs font-semibold block">Active Queue Workers</span>
-                <span className="text-white text-lg font-bold mt-1 block">
-                  {data.queue.totalWorkers} Worker{data.queue.totalWorkers !== 1 ? 's' : ''}
+                <span className="text-gray-400 text-xs font-semibold block">Queue Worker Status</span>
+                <span className={`text-lg font-bold mt-1 block ${
+                  data.queue.workerStatus === 'running' ? 'text-white' : 'text-rose-400'
+                }`}>
+                  {data.queue.workerStatus === 'running' ? 'Active & Listening' : 'Outage Simulated (Paused)'}
                 </span>
                 <span className="text-[10px] text-gray-500 mt-1 block">
-                  Decoupled commit worker is listening
+                  Active workers: <span className="font-semibold text-gray-300">{data.queue.totalWorkers}</span>
                 </span>
               </div>
             </div>
