@@ -3,6 +3,7 @@ import { PrismaClient, Prisma } from '@prisma/client';
 import { redisConnectionConfig } from '../config/redis';
 import { fetchCommitDiff } from '../services/githubService';
 import { decrypt } from '../utils/crypto';
+import { summarizeCommit } from '../services/aiService';
 
 const prisma = new PrismaClient();
 
@@ -101,6 +102,16 @@ export const startCommitWorker = () => {
         // 4. Fetch diff details from GitHub API
         const fetchedDetails = await fetchCommitDiff(owner, repoName, sha, userToken);
 
+        // 4b. Generate commit-level AI summary (WHY, not just WHAT)
+        let aiSummary: string | null = null;
+        try {
+          if (fetchedDetails.diffText && fetchedDetails.diffText !== 'No file changes found in this commit.' && !fetchedDetails.diffText.includes('All files in this commit were ignored')) {
+            aiSummary = await summarizeCommit(fetchedDetails.message, fetchedDetails.diffText);
+          }
+        } catch (aiErr: any) {
+          console.warn(`[Worker] Failed to generate AI summary for commit ${sha}:`, aiErr.message);
+        }
+
         // 5. Persist commit to PostgreSQL
         await prisma.commit.create({
           data: {
@@ -109,6 +120,7 @@ export const startCommitWorker = () => {
             repository: repository,
             message: fetchedDetails.message,
             diffText: fetchedDetails.diffText,
+            aiSummary: aiSummary,
             commitDate: fetchedDetails.commitDate,
           },
         });

@@ -4,6 +4,8 @@ import { generateDailySummary } from '../services/summaryService';
 
 const prisma = new PrismaClient();
 
+export let lastCronRun: Date | null = null;
+
 /**
  * Initializes timezone-aware nightly cron triggers for daily AI summaries.
  * Checks hourly at the start of each hour. If it is 11 PM (23:00) in a user's
@@ -14,6 +16,7 @@ export const initCronJobs = () => {
 
   // Run at the beginning of every hour (e.g. "0 * * * *")
   cron.schedule('0 * * * *', async () => {
+    lastCronRun = new Date();
     console.log('[Cron] Running hourly timezone-based check...');
     try {
       const users = await prisma.user.findMany();

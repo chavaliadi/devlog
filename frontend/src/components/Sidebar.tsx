@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, GitCommit, BookOpen, LogOut } from 'lucide-react';
+import { LayoutDashboard, GitCommit, BookOpen, LogOut, Settings, Activity } from 'lucide-react';
 
 interface SidebarProps {
   currentTab: string;
@@ -16,6 +16,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onTabChange, user,
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'commits', label: 'Commits Feed', icon: GitCommit },
+    { id: 'repositories', label: 'Repositories', icon: Settings },
+    { id: 'health', label: 'System Status', icon: Activity },
     { id: 'portfolio', label: 'Recruiter Portfolio', icon: BookOpen },
   ];
 

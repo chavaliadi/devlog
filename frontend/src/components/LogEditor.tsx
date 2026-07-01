@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Save, CheckCircle, ArrowLeft, Eye, GitBranch, Trash2 } from 'lucide-react';
+import { Save, CheckCircle, ArrowLeft, Eye, GitBranch, Trash2, Sparkles } from 'lucide-react';
 
 interface Commit {
   id: string;
@@ -7,6 +7,7 @@ interface Commit {
   repository: string;
   message: string;
   diffText: string | null;
+  aiSummary: string | null;
   commitDate: string;
 }
 
@@ -97,9 +98,44 @@ export const LogEditor: React.FC<LogEditorProps> = ({
 }) => {
   const [content, setContent] = useState(entry.content);
   const [status, setStatus] = useState(entry.status);
-  const [activeRightTab, setActiveRightTab] = useState<'preview' | 'commits'>('preview');
   const [isSaving, setIsSaving] = useState(false);
+  const [activeRightTab, setActiveRightTab] = useState<'preview' | 'commits'>('preview');
   const [selectedCommitDiff, setSelectedCommitDiff] = useState<string | null>(null);
+
+  // Resume Bullets State
+  const [isGeneratingBullets, setIsGeneratingBullets] = useState(false);
+  const [resumeBullets, setResumeBullets] = useState<string | null>(null);
+  const [showBulletsModal, setShowBulletsModal] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const handleGenerateBullets = async () => {
+    setIsGeneratingBullets(true);
+    try {
+      const res = await fetch(`/api/entries/${entry.id}/resume-bullets`, {
+        method: 'POST',
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setResumeBullets(data.bullets);
+        setShowBulletsModal(true);
+      } else {
+        alert(data.error || 'Failed to generate resume bullets.');
+      }
+    } catch (e) {
+      console.error(e);
+      alert('Failed to connect to bullet generator service.');
+    } finally {
+      setIsGeneratingBullets(false);
+    }
+  };
+
+  const handleCopyBullets = () => {
+    if (resumeBullets) {
+      navigator.clipboard.writeText(resumeBullets);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
 
   useEffect(() => {
     setContent(entry.content);
@@ -190,6 +226,15 @@ export const LogEditor: React.FC<LogEditorProps> = ({
           >
             <CheckCircle className="w-4 h-4" />
             {isSaving && status === 'published' ? 'Publishing...' : 'Publish log'}
+          </button>
+
+          <button
+            onClick={handleGenerateBullets}
+            disabled={isGeneratingBullets || isSaving}
+            className="px-4 py-2 rounded-xl text-xs font-semibold bg-gray-800 text-indigo-400 hover:bg-gray-800/80 border border-indigo-500/20 transition-all cursor-pointer flex items-center gap-1.5"
+          >
+            <Sparkles className="w-4 h-4 text-indigo-400" />
+            {isGeneratingBullets ? 'Compiling Bullets...' : 'Resume Bullets'}
           </button>
         </div>
       </div>
@@ -290,6 +335,12 @@ export const LogEditor: React.FC<LogEditorProps> = ({
                         <p className="text-sm text-gray-200 font-medium">
                           {commit.message}
                         </p>
+                        {commit.aiSummary && (
+                          <div className="bg-indigo-600/5 border border-indigo-500/10 p-2.5 rounded-lg text-xs text-indigo-300 italic flex flex-col gap-1 mt-1">
+                            <span className="text-[9px] uppercase tracking-wider text-indigo-400 font-bold not-italic">AI Summary</span>
+                            "{commit.aiSummary}"
+                          </div>
+                        )}
                         {commit.diffText && (
                           <span className="text-[10px] text-indigo-400/80 mt-1 flex items-center gap-1">
                             Click to view filtered git diff patches
@@ -304,6 +355,39 @@ export const LogEditor: React.FC<LogEditorProps> = ({
           </div>
         </div>
       </div>
+
+      {showBulletsModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="glass-panel max-w-lg w-full rounded-2xl border border-glass-border p-6 shadow-2xl relative animate-in fade-in duration-200">
+            <h3 className="text-lg font-bold text-white mb-2 flex items-center gap-2">
+              <Sparkles className="w-5 h-5 text-indigo-400" />
+              Generated Resume Bullets
+            </h3>
+            <p className="text-gray-400 text-xs mb-4">
+              AI-generated software engineering bullet points from this daily log. Copy and paste them directly into your resume!
+            </p>
+            
+            <div className="bg-gray-950/60 p-4 rounded-xl border border-glass-border font-mono text-xs text-gray-300 whitespace-pre-wrap leading-relaxed max-h-60 overflow-y-auto custom-scrollbar mb-4 select-text">
+              {resumeBullets || 'No bullets generated.'}
+            </div>
+
+            <div className="flex items-center justify-end gap-3">
+              <button
+                onClick={handleCopyBullets}
+                className="px-4 py-2 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white transition-all cursor-pointer min-w-[120px]"
+              >
+                {copied ? 'Copied!' : 'Copy to Clipboard'}
+              </button>
+              <button
+                onClick={() => setShowBulletsModal(false)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-300 hover:bg-gray-800/60 border border-gray-700/50 transition-all cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

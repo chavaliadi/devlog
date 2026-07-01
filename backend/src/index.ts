@@ -6,11 +6,12 @@ import { PrismaClient } from '@prisma/client';
 import { commitQueue } from './queues/commitQueue';
 import { startCommitWorker } from './workers/commitWorker';
 import { verifyGitHubWebhook, AuthenticatedRequest } from './middleware/verifyWebhook';
-import { initCronJobs } from './config/cron';
+import { initCronJobs, lastCronRun } from './config/cron';
 import { generateDailySummary } from './services/summaryService';
 import { requireAuth, AuthRequest } from './middleware/auth';
 import { encrypt, decrypt } from './utils/crypto';
 import { fetchCommitDiff } from './services/githubService';
+import { summarizeCommit, generateResumeBullets } from './services/aiService';
 
 dotenv.config();
 
@@ -118,8 +119,31 @@ app.post(
 
       if (eventType === 'push') {
         const payload = req.body;
-        const commits = payload.commits || [];
         const repository = payload.repository?.full_name;
+
+        if (!repository) {
+          res.status(400).json({ error: 'Missing repository field' });
+          return;
+        }
+
+        // Check if this repository is tracked by any user in Devlog
+        const trackedRepo = await prisma.repository.findFirst({
+          where: {
+            fullName: repository,
+            isTracked: true,
+          },
+        });
+
+        if (!trackedRepo) {
+          console.log(`[Webhook] Repository '${repository}' is not tracked by any user in Devlog. Skipping commit ingestion.`);
+          res.status(200).json({
+            status: 'ignored',
+            message: `Repository '${repository}' is not actively tracked in Devlog.`,
+          });
+          return;
+        }
+
+        const commits = payload.commits || [];
         const pusher = payload.pusher?.name;
         const ref = payload.ref;
 
@@ -487,6 +511,179 @@ app.get('/api/public/entries/:username', async (req, res) => {
 // Secured REST API Routes
 // ==========================================
 
+// Repository Management Routes
+app.get('/api/repos', requireAuth as express.RequestHandler, async (req: AuthRequest, res) => {
+  try {
+    const repos = await prisma.repository.findMany({
+      where: { userId: req.user!.id },
+      orderBy: { fullName: 'asc' },
+    });
+    res.status(200).json({ success: true, repositories: repos });
+  } catch (error: any) {
+    console.error('[API] Failed to fetch repositories:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/api/repos/sync-all', requireAuth as express.RequestHandler, async (req: AuthRequest, res) => {
+  try {
+    const user = req.user!;
+    if (!user.accessToken || user.accessToken === 'placeholder_access_token') {
+      res.status(400).json({ success: false, error: 'GitHub account not connected or missing token.' });
+      return;
+    }
+
+    const token = decrypt(user.accessToken);
+    let page = 1;
+    let allRepos: any[] = [];
+
+    while (true) {
+      const url = `https://api.github.com/user/repos?sort=updated&per_page=100&page=${page}`;
+      const response = await fetch(url, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'User-Agent': 'Devlog-App',
+          'Accept': 'application/vnd.github+json',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`GitHub repos API returned status ${response.status}`);
+      }
+
+      const repos = (await response.json()) as any[];
+      if (!Array.isArray(repos) || repos.length === 0) {
+        break;
+      }
+
+      allRepos.push(...repos);
+      if (repos.length < 100) {
+        break;
+      }
+      page++;
+    }
+
+    // Save/update repos in DB
+    const syncedRepos = [];
+    for (const repo of allRepos) {
+      const dbRepo = await prisma.repository.upsert({
+        where: {
+          userId_fullName: {
+            userId: user.id,
+            fullName: repo.full_name,
+          },
+        },
+        update: {
+          language: repo.language || null,
+          stars: repo.stargazers_count || 0,
+        },
+        create: {
+          userId: user.id,
+          fullName: repo.full_name,
+          isTracked: false,
+          language: repo.language || null,
+          stars: repo.stargazers_count || 0,
+        },
+      });
+      syncedRepos.push(dbRepo);
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `Successfully synchronized ${syncedRepos.length} repositories from GitHub.`,
+      count: syncedRepos.length,
+      repositories: syncedRepos,
+    });
+  } catch (error: any) {
+    console.error('[API] Failed to sync repositories:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.patch('/api/repos/:id/toggle', requireAuth as express.RequestHandler, async (req: AuthRequest, res) => {
+  try {
+    const { id } = req.params;
+    const repo = await prisma.repository.findFirst({
+      where: {
+        id,
+        userId: req.user!.id,
+      },
+    });
+
+    if (!repo) {
+      res.status(404).json({ success: false, error: 'Repository not found' });
+      return;
+    }
+
+    const updated = await prisma.repository.update({
+      where: { id },
+      data: {
+        isTracked: !repo.isTracked,
+      },
+    });
+
+    res.status(200).json({ success: true, repository: updated });
+  } catch (error: any) {
+    console.error('[API] Failed to toggle repository:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// System Health Dashboard API Route (authenticated for privacy of queue logs)
+app.get('/api/health', requireAuth as express.RequestHandler, async (req: AuthRequest, res) => {
+  try {
+    // 1. Database Connection check & latency
+    const dbStart = Date.now();
+    await prisma.$queryRaw`SELECT 1`;
+    const dbLatency = Date.now() - dbStart;
+
+    // 2. Redis Connection check & latency
+    const redisStart = Date.now();
+    const redisClient = await commitQueue.client;
+    const redisPing = await (redisClient as any).ping();
+    const redisLatency = Date.now() - redisStart;
+    const redisStatus = redisPing === 'PONG' ? 'connected' : 'unreachable';
+
+    // 3. BullMQ queue introspection
+    const counts = await commitQueue.getJobCounts('waiting', 'active', 'completed', 'failed');
+
+    // 4. Ingestion workers status (Active checks)
+    const activeWorkers = await commitQueue.getWorkers();
+
+    res.status(200).json({
+      success: true,
+      status: 'healthy',
+      database: {
+        status: 'connected',
+        latencyMs: dbLatency,
+      },
+      redis: {
+        status: redisStatus,
+        latencyMs: redisLatency,
+      },
+      queue: {
+        waiting: counts.waiting || 0,
+        active: counts.active || 0,
+        completed: counts.completed || 0,
+        failed: counts.failed || 0,
+        totalWorkers: activeWorkers.length,
+      },
+      cron: {
+        timezone: 'Asia/Kolkata', // default timezone
+        lastCheckAt: lastCronRun ? lastCronRun.toISOString() : null,
+      },
+      serverTime: new Date().toISOString(),
+    });
+  } catch (error: any) {
+    console.error('[API Health] Health diagnostic failed:', error.message);
+    res.status(500).json({
+      success: false,
+      status: 'unhealthy',
+      error: error.message,
+    });
+  }
+});
+
 // 1. GET /api/entries - Get list of daily summaries scoped to the session user
 app.get('/api/entries', requireAuth as express.RequestHandler, async (req: AuthRequest, res) => {
   try {
@@ -585,25 +782,28 @@ app.post('/api/commits/sync', requireAuth as express.RequestHandler, async (req:
 
     const token = decrypt(user.accessToken);
 
-    // Fetch user's public and private repositories (up to 8 repos)
-    const reposResponse = await fetch('https://api.github.com/user/repos?sort=updated&per_page=8', {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'User-Agent': 'Devlog-App',
-        'Accept': 'application/vnd.github+json',
+    // Fetch user's tracked repositories from the database
+    const trackedRepos = await prisma.repository.findMany({
+      where: {
+        userId: user.id,
+        isTracked: true,
       },
     });
 
-    if (!reposResponse.ok) {
-      throw new Error(`GitHub repos API returned ${reposResponse.status}`);
+    if (trackedRepos.length === 0) {
+      res.status(200).json({
+        success: true,
+        message: 'Sync skipped. No repositories are actively tracked. Please toggle tracked repositories in settings.',
+        count: 0,
+      });
+      return;
     }
 
-    const repos = (await reposResponse.json()) as any[];
     let syncedCommitsCount = 0;
     
     // Process repos sequentially to avoid rate limiting or slamming the DB
-    for (const repo of repos) {
-      const repoFullName = repo.full_name; // e.g. "owner/repo"
+    for (const repo of trackedRepos) {
+      const repoFullName = repo.fullName; // owner/repo
       const [repoOwner, repoName] = repoFullName.split('/');
 
       // Fetch recent commits for this user from this repo (up to 5 commits per repo)
@@ -647,6 +847,16 @@ app.post('/api/commits/sync', requireAuth as express.RequestHandler, async (req:
           // Fetch detailed commit diff using our helper service
           const details = await fetchCommitDiff(repoOwner, repoName, sha, token);
 
+          // Generate commit-level AI summary (WHY, not just WHAT)
+          let aiSummary: string | null = null;
+          try {
+            if (details.diffText && details.diffText !== 'No file changes found in this commit.' && !details.diffText.includes('All files in this commit were ignored')) {
+              aiSummary = await summarizeCommit(details.message, details.diffText);
+            }
+          } catch (aiErr: any) {
+            console.warn(`[API Sync] Failed to generate AI summary for commit ${sha}:`, aiErr.message);
+          }
+
           // Save commit to database
           await prisma.commit.create({
             data: {
@@ -655,6 +865,7 @@ app.post('/api/commits/sync', requireAuth as express.RequestHandler, async (req:
               repository: repoFullName,
               message: details.message,
               diffText: details.diffText,
+              aiSummary: aiSummary,
               commitDate: details.commitDate,
             },
           });
@@ -663,6 +874,12 @@ app.post('/api/commits/sync', requireAuth as express.RequestHandler, async (req:
           console.error(`[API Sync] Failed to ingest commit ${sha}:`, err.message);
         }
       }
+
+      // Update last sync time for this repository
+      await prisma.repository.update({
+        where: { id: repo.id },
+        data: { lastSyncAt: new Date() },
+      });
     }
 
     res.status(200).json({
@@ -743,6 +960,40 @@ app.delete('/api/entries/:id', requireAuth as express.RequestHandler, async (req
     res.status(200).json({ success: true, message: 'Entry successfully deleted.' });
   } catch (error: any) {
     console.error('[API] Failed to delete entry:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 7. POST /api/entries/:id/resume-bullets - Generate resume bullet points from entry content
+app.post('/api/entries/:id/resume-bullets', requireAuth as express.RequestHandler, async (req: AuthRequest, res) => {
+  try {
+    const { id } = req.params;
+
+    const entry = await prisma.entry.findFirst({
+      where: {
+        id,
+        userId: req.user!.id,
+      },
+    });
+
+    if (!entry) {
+      res.status(404).json({ success: false, error: 'Daily log entry not found' });
+      return;
+    }
+
+    if (!entry.content) {
+      res.status(400).json({ success: false, error: 'Entry content is empty' });
+      return;
+    }
+
+    const bullets = await generateResumeBullets(entry.content);
+
+    res.status(200).json({
+      success: true,
+      bullets,
+    });
+  } catch (error: any) {
+    console.error('[API] Resume bullet generation failed:', error.message);
     res.status(500).json({ success: false, error: error.message });
   }
 });

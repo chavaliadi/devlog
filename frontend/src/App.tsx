@@ -5,6 +5,8 @@ import { LogTimeline } from './components/LogTimeline';
 import { LogEditor } from './components/LogEditor';
 import { CommitList } from './components/CommitList';
 import { PublicPortfolio } from './components/PublicPortfolio';
+import { RepoSettings } from './components/RepoSettings';
+import { HealthDashboard } from './components/HealthDashboard';
 import { Sparkles, RefreshCw, XCircle, CheckCircle2 } from 'lucide-react';
 
 const Github = ({ className }: { className?: string }) => (
@@ -38,6 +40,7 @@ interface Commit {
   repository: string;
   message: string;
   diffText: string | null;
+  aiSummary: string | null;
   commitDate: string;
 }
 
@@ -554,6 +557,12 @@ function App() {
         ) : currentTab === 'commits' ? (
           /* Commits Feed Tab View */
           <CommitList commits={commits} />
+        ) : currentTab === 'repositories' ? (
+          /* Repositories Config Tab View */
+          <RepoSettings showToast={showToast} onTrackedChange={fetchData} />
+        ) : currentTab === 'health' ? (
+          /* Health Diagnostic Tab View */
+          <HealthDashboard />
         ) : (
           /* Public Share Mode Tab View (Self preview) */
           <PublicPortfolio
