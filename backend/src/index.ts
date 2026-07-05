@@ -12,6 +12,7 @@ import { requireAuth, AuthRequest } from './middleware/auth';
 import { encrypt, decrypt } from './utils/crypto';
 import { fetchCommitDiff } from './services/githubService';
 import { summarizeCommit, generateResumeBullets } from './services/aiService';
+import { getRepositoryIntelligence, getEngineeringTimeline, searchEntriesSemantically } from './services/intelligenceService';
 
 dotenv.config();
 
@@ -196,7 +197,49 @@ app.post(
 // GitHub OAuth 2.0 Flow Endpoints
 // ==========================================
 
-// 1. GET /api/auth/github - Redirect to GitHub Authorize portal
+// 1a. POST /api/auth/demo - Bypass GitHub OAuth and authenticate as default seeded user for local testing/demo
+app.post('/api/auth/demo', async (req: any, res) => {
+  try {
+    const defaultUsername = process.env.DEFAULT_DEVELOPER_USERNAME || 'chavaliadi';
+    
+    // Find or create the default seeded developer profile
+    let user = await prisma.user.findUnique({
+      where: { username: defaultUsername }
+    });
+
+    if (!user) {
+      user = await prisma.user.create({
+        data: {
+          githubId: '63385732',
+          username: defaultUsername,
+          email: 'adithya3218@gmail.com',
+          avatarUrl: `https://github.com/${defaultUsername}.png`,
+          accessToken: 'placeholder_access_token', // Signals demo/mock sync mode
+          timezone: 'Asia/Kolkata'
+        }
+      });
+    }
+
+    req.session.userId = user.id;
+    console.log(`[Demo Auth] Successfully logged in mock user: ${user.username}`);
+
+    res.status(200).json({
+      success: true,
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        avatarUrl: user.avatarUrl,
+        timezone: user.timezone
+      }
+    });
+  } catch (error: any) {
+    console.error('[Demo Auth] Error logging in mock user:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 1b. GET /api/auth/github - Redirect to GitHub Authorize portal
 app.get('/api/auth/github', (req, res) => {
   const clientId = process.env.GITHUB_CLIENT_ID;
   if (!clientId) {
@@ -528,8 +571,46 @@ app.get('/api/repos', requireAuth as express.RequestHandler, async (req: AuthReq
 app.post('/api/repos/sync-all', requireAuth as express.RequestHandler, async (req: AuthRequest, res) => {
   try {
     const user = req.user!;
-    if (!user.accessToken || user.accessToken === 'placeholder_access_token') {
-      res.status(400).json({ success: false, error: 'GitHub account not connected or missing token.' });
+    const isDemoMode = !user.accessToken || user.accessToken === 'placeholder_access_token';
+
+    if (isDemoMode) {
+      // Mock seed repositories in demo mode
+      const mockRepos = [
+        { fullName: 'chavaliadi/devlog', language: 'TypeScript', stars: 24 },
+        { fullName: 'chavaliadi/microservice-auth', language: 'TypeScript', stars: 15 },
+        { fullName: 'chavaliadi/data-crawler', language: 'Python', stars: 8 }
+      ];
+
+      const syncedRepos = [];
+      for (const repo of mockRepos) {
+        const dbRepo = await prisma.repository.upsert({
+          where: {
+            userId_fullName: {
+              userId: user.id,
+              fullName: repo.fullName,
+            },
+          },
+          update: {
+            language: repo.language,
+            stars: repo.stars,
+          },
+          create: {
+            userId: user.id,
+            fullName: repo.fullName,
+            isTracked: true, // Default to tracked in demo so commits are immediately synced
+            language: repo.language,
+            stars: repo.stars,
+          },
+        });
+        syncedRepos.push(dbRepo);
+      }
+
+      res.status(200).json({
+        success: true,
+        message: `Successfully synchronized ${syncedRepos.length} mock repositories.`,
+        count: syncedRepos.length,
+        repositories: syncedRepos,
+      });
       return;
     }
 
@@ -727,6 +808,23 @@ app.get('/api/entries', requireAuth as express.RequestHandler, async (req: AuthR
   }
 });
 
+// 10. GET /api/entries/search - Perform context-weighted semantic search over journals
+app.get('/api/entries/search', requireAuth as express.RequestHandler, async (req: AuthRequest, res) => {
+  try {
+    const { query } = req.query;
+    if (!query || typeof query !== 'string') {
+      res.status(400).json({ success: false, error: 'Query parameter is required' });
+      return;
+    }
+
+    const results = await searchEntriesSemantically(req.user!.id, query);
+    res.status(200).json({ success: true, results });
+  } catch (error: any) {
+    console.error('[API] Semantic search failed:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // 2. GET /api/entries/:id - Get single daily summary
 app.get('/api/entries/:id', requireAuth as express.RequestHandler, async (req: AuthRequest, res) => {
   try {
@@ -803,8 +901,83 @@ app.get('/api/commits', requireAuth as express.RequestHandler, async (req: AuthR
 app.post('/api/commits/sync', requireAuth as express.RequestHandler, async (req: AuthRequest, res) => {
   try {
     const user = req.user!;
-    if (!user.accessToken || user.accessToken === 'placeholder_access_token') {
-      res.status(400).json({ success: false, error: 'GitHub account not connected or missing token.' });
+    const isDemoMode = !user.accessToken || user.accessToken === 'placeholder_access_token';
+
+    if (isDemoMode) {
+      // Ingest mock commits!
+      const { getMockCommits } = require('./utils/mockCommits');
+      const mockCommits = getMockCommits();
+
+      // Ensure mock repositories are created in the database first
+      const mockRepos = Array.from(new Set(mockCommits.map(c => c.repository)));
+      for (const repoName of mockRepos) {
+        await prisma.repository.upsert({
+          where: {
+            userId_fullName: {
+              userId: user.id,
+              fullName: repoName,
+            },
+          },
+          update: { isTracked: true },
+          create: {
+            userId: user.id,
+            fullName: repoName,
+            isTracked: true,
+            language: repoName.includes('crawler') ? 'Python' : 'TypeScript',
+            stars: 12,
+          },
+        });
+      }
+
+      let ingestedCount = 0;
+      for (const mc of mockCommits) {
+        const existing = await prisma.commit.findUnique({
+          where: {
+            repository_sha: {
+              repository: mc.repository,
+              sha: mc.sha,
+            },
+          },
+        });
+
+        if (!existing) {
+          // Generate an AI explanation of this commit!
+          let aiSummary: string | null = null;
+          try {
+            aiSummary = await summarizeCommit(mc.message, mc.diffText);
+          } catch (aiErr: any) {
+            console.warn(`[Mock Sync] Failed to generate AI summary for commit ${mc.sha}:`, aiErr.message);
+          }
+
+          await prisma.commit.create({
+            data: {
+              userId: user.id,
+              sha: mc.sha,
+              repository: mc.repository,
+              message: mc.message,
+              diffText: mc.diffText,
+              aiSummary,
+              commitDate: mc.commitDate,
+            },
+          });
+          ingestedCount++;
+        }
+      }
+
+      // Also trigger a user repository lastSyncAt update
+      const repos = await prisma.repository.findMany({ where: { userId: user.id } });
+      for (const repo of repos) {
+        await prisma.repository.update({
+          where: { id: repo.id },
+          data: { lastSyncAt: new Date() },
+        });
+      }
+
+      res.status(200).json({
+        success: true,
+        message: `Demo Sync completed. Ingested ${ingestedCount} new mock commits.`,
+        count: ingestedCount,
+      });
       return;
     }
 
@@ -988,6 +1161,28 @@ app.delete('/api/entries/:id', requireAuth as express.RequestHandler, async (req
     res.status(200).json({ success: true, message: 'Entry successfully deleted.' });
   } catch (error: any) {
     console.error('[API] Failed to delete entry:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 8. GET /api/repos/intelligence - Compile tech stats, codebase metrics, and evaluation summaries
+app.get('/api/repos/intelligence', requireAuth as express.RequestHandler, async (req: AuthRequest, res) => {
+  try {
+    const intel = await getRepositoryIntelligence(req.user!.id);
+    res.status(200).json({ success: true, intelligence: intel });
+  } catch (error: any) {
+    console.error('[API] Failed to fetch repo intelligence:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 9. GET /api/repos/timeline - Retrieve development architectural milestones
+app.get('/api/repos/timeline', requireAuth as express.RequestHandler, async (req: AuthRequest, res) => {
+  try {
+    const timeline = await getEngineeringTimeline(req.user!.id);
+    res.status(200).json({ success: true, timeline });
+  } catch (error: any) {
+    console.error('[API] Failed to fetch engineering timeline:', error.message);
     res.status(500).json({ success: false, error: error.message });
   }
 });

@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, GitCommit, BookOpen, LogOut, Settings, Activity } from 'lucide-react';
+import { LayoutDashboard, GitCommit, BookOpen, LogOut, Settings, Activity, Brain, Clock, Search } from 'lucide-react';
 
 interface SidebarProps {
   currentTab: string;
@@ -15,6 +15,9 @@ interface SidebarProps {
 export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onTabChange, user, onLogout }) => {
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'intelligence', label: 'Repo Intelligence', icon: Brain },
+    { id: 'timeline', label: 'Engineering Timeline', icon: Clock },
+    { id: 'search', label: 'Semantic Search', icon: Search },
     { id: 'commits', label: 'Commits Feed', icon: GitCommit },
     { id: 'repositories', label: 'Repositories', icon: Settings },
     { id: 'health', label: 'System Status', icon: Activity },

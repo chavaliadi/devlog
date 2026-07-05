@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { BookOpen, User, Calendar, Eye, FileText, ArrowLeft, GitCommit, GitBranch, Flame, ExternalLink, Activity, X } from 'lucide-react';
+import { BookOpen, User, Calendar, Eye, FileText, GitCommit, GitBranch, Flame, ExternalLink, Activity, X } from 'lucide-react';
 
 interface Entry {
   id: string;

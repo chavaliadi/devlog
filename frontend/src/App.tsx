@@ -7,6 +7,9 @@ import { CommitList } from './components/CommitList';
 import { PublicPortfolio } from './components/PublicPortfolio';
 import { RepoSettings } from './components/RepoSettings';
 import { HealthDashboard } from './components/HealthDashboard';
+import { RepoIntelligence } from './components/RepoIntelligence';
+import { EngineeringTimeline } from './components/EngineeringTimeline';
+import { SemanticSearch } from './components/SemanticSearch';
 import { Sparkles, RefreshCw, XCircle, CheckCircle2 } from 'lucide-react';
 
 const Github = ({ className }: { className?: string }) => (
@@ -212,6 +215,30 @@ function App() {
       showToast('error', e.message || 'No commits found for today or API key invalid.');
     } finally {
       setIsCompiling(false);
+    }
+  };
+
+  const handleDemoLogin = async () => {
+    setIsLoading(true);
+    try {
+      const res = await fetch('/api/auth/demo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setUser(data.user);
+        setIsAuthenticated(true);
+        showToast('success', 'Demo Mode Activated. Welcome!');
+        await fetchData();
+      } else {
+        throw new Error(data.error || 'Failed to initialize Demo Mode');
+      }
+    } catch (e: any) {
+      console.error(e);
+      showToast('error', e.message || 'Demo login failed.');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -431,6 +458,14 @@ function App() {
               <Github className="w-5 h-5 text-gray-100" />
               <span>Connect with GitHub</span>
             </a>
+
+            <button
+              onClick={handleDemoLogin}
+              className="w-full mt-3 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-3 px-6 rounded-xl flex items-center justify-center gap-3 transition-all duration-200 transform hover:scale-[1.01] cursor-pointer shadow-md shadow-indigo-600/10"
+            >
+              <Sparkles className="w-5 h-5 text-indigo-200" />
+              <span>Launch Demo Workspace</span>
+            </button>
             
             <div className="mt-8 text-[11px] text-gray-500 max-w-[280px]">
               Access token usage is limited to repository log read actions. Credentials are fully encrypted.
@@ -554,6 +589,15 @@ function App() {
               onSelectEntry={(id) => setSelectedEntryId(id)}
             />
           </div>
+        ) : currentTab === 'intelligence' ? (
+          /* Repository Intelligence Dashboard Tab View */
+          <RepoIntelligence />
+        ) : currentTab === 'timeline' ? (
+          /* Engineering Timeline Tab View */
+          <EngineeringTimeline />
+        ) : currentTab === 'search' ? (
+          /* Semantic Search Tab View */
+          <SemanticSearch onSelectEntry={(id) => setSelectedEntryId(id)} />
         ) : currentTab === 'commits' ? (
           /* Commits Feed Tab View */
           <CommitList commits={commits} />
