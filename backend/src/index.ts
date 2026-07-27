@@ -2,6 +2,7 @@ import express, { Response } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import cookieSession from 'cookie-session';
+import { Prisma } from '@prisma/client';
 import { prisma } from './lib/prisma';
 import { commitQueue } from './queues/commitQueue';
 import { startCommitWorker, pauseCommitWorker, resumeCommitWorker, isCommitWorkerPaused } from './workers/commitWorker';
@@ -158,6 +159,7 @@ app.post(
           const job = await commitQueue.add(
             'github-commit',
             {
+              userId: trackedRepo.userId,
               repository,
               commit,
               pusher,
@@ -953,18 +955,26 @@ app.post('/api/commits/sync', requireAuth as express.RequestHandler, async (req:
             console.warn(`[Mock Sync] Failed to generate AI summary for commit ${mc.sha}:`, aiErr.message);
           }
 
-          await prisma.commit.create({
-            data: {
-              userId: user.id,
-              sha: mc.sha,
-              repository: mc.repository,
-              message: mc.message,
-              diffText: mc.diffText,
-              aiSummary,
-              commitDate: mc.commitDate,
-            },
-          });
-          ingestedCount++;
+          try {
+            await prisma.commit.create({
+              data: {
+                userId: user.id,
+                sha: mc.sha,
+                repository: mc.repository,
+                message: mc.message,
+                diffText: mc.diffText,
+                aiSummary,
+                commitDate: mc.commitDate,
+              },
+            });
+            ingestedCount++;
+          } catch (createErr: any) {
+            if (createErr instanceof Prisma.PrismaClientKnownRequestError && createErr.code === 'P2002') {
+              console.log(`[Mock Sync] Unique constraint P2002 caught for ${mc.repository} / ${mc.sha}. Skipping duplicate.`);
+            } else {
+              throw createErr;
+            }
+          }
         }
       }
 
@@ -1063,18 +1073,26 @@ app.post('/api/commits/sync', requireAuth as express.RequestHandler, async (req:
           }
 
           // Save commit to database
-          await prisma.commit.create({
-            data: {
-              userId: user.id,
-              sha,
-              repository: repoFullName,
-              message: details.message,
-              diffText: details.diffText,
-              aiSummary: aiSummary,
-              commitDate: details.commitDate,
-            },
-          });
-          syncedCommitsCount++;
+          try {
+            await prisma.commit.create({
+              data: {
+                userId: user.id,
+                sha,
+                repository: repoFullName,
+                message: details.message,
+                diffText: details.diffText,
+                aiSummary: aiSummary,
+                commitDate: details.commitDate,
+              },
+            });
+            syncedCommitsCount++;
+          } catch (createErr: any) {
+            if (createErr instanceof Prisma.PrismaClientKnownRequestError && createErr.code === 'P2002') {
+              console.log(`[API Sync] Unique constraint P2002 caught for ${repoFullName} / ${sha}. Skipping duplicate.`);
+            } else {
+              throw createErr;
+            }
+          }
         } catch (err: any) {
           console.error(`[API Sync] Failed to ingest commit ${sha}:`, err.message);
         }
@@ -1214,7 +1232,7 @@ app.post('/api/entries/:id/resume-bullets', requireAuth as express.RequestHandle
     }
 
     // 1. Query all commits matching the entry date & user timezone
-    const targetDateStr = formatDateInTimezone(entry.date, req.user!.timezone);
+    const targetDateStr = entry.date.toISOString().split('T')[0];
     const commits = await getCommitsForDate(req.user!.id, targetDateStr, req.user!.timezone);
 
     // 2. Collect unique filenames to prevent double-counting across commits

@@ -121,7 +121,18 @@ ${commit.diffText || '[No file diff available]'}
 
   let entry;
   if (existingEntry) {
-    console.log(`[SummaryService] Updating existing entry ${existingEntry.id} for ${dateStr}...`);
+    if (existingEntry.status === 'published') {
+      console.log(`[SummaryService] Entry ${existingEntry.id} for date ${dateStr} is published. Skipping update to preserve user edits.`);
+      return {
+        success: false,
+        reason: 'entry_published',
+        message: `Devlog entry for date ${dateStr} is published and cannot be automatically overwritten.`,
+        entryId: existingEntry.id,
+        entry: existingEntry,
+      };
+    }
+
+    console.log(`[SummaryService] Updating existing draft entry ${existingEntry.id} for ${dateStr}...`);
     entry = await prisma.entry.update({
       where: { id: existingEntry.id },
       data: {

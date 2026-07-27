@@ -20,6 +20,7 @@ interface WebhookCommit {
 }
 
 interface WebhookJobData {
+  userId?: string;
   repository: string; // owner/repo
   commit: WebhookCommit;
   pusher: string;
@@ -36,7 +37,7 @@ export const startCommitWorker = () => {
     'commit-queue',
     async (job: Job<WebhookJobData>) => {
       console.log(`[Worker] Starting job ${job.id} of type ${job.name}...`);
-      const { repository, commit, pusher } = job.data;
+      const { userId, repository, commit, pusher } = job.data;
 
       if (!repository || !commit) {
         console.warn(`[Worker] Job ${job.id} contains insufficient data. Skipping.`);
@@ -53,33 +54,15 @@ export const startCommitWorker = () => {
       }
       const [owner, repoName] = parts;
 
-      // 2. Identify the target User in our database
-      let user = await prisma.user.findFirst({
-        where: {
-          OR: [
-            { username: owner },
-            { username: pusher },
-          ],
-        },
-      });
+      // 2. Identify the target User in database directly via job.data.userId
+      const user = userId
+        ? await prisma.user.findUnique({ where: { id: userId } })
+        : null;
 
       if (!user) {
-        const defaultUsername = process.env.DEFAULT_DEVELOPER_USERNAME || 'chavaliadi';
-        console.warn(
-          `[Worker] No matching user found for owner '${owner}' or pusher '${pusher}'. Falling back to default user '${defaultUsername}'.`
+        throw new Error(
+          `[Worker] Unable to process commit ${sha}: target userId '${userId}' is missing or user does not exist.`
         );
-        user = await prisma.user.findFirst({
-          where: { username: defaultUsername },
-        });
-
-        if (!user) {
-          console.warn(`[Worker] User '${defaultUsername}' not found. Falling back to the first user in the database.`);
-          user = await prisma.user.findFirst();
-        }
-
-        if (!user) {
-          throw new Error('Database contains no users to associate with incoming commits.');
-        }
       }
 
       console.log(`[Worker] Associating commit with user: ${user.username} (ID: ${user.id})`);

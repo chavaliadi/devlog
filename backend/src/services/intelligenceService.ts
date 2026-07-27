@@ -86,15 +86,16 @@ export async function getRepositoryIntelligence(userId: string) {
       const lines = c.diffText.split('\n');
       lines.forEach((line) => {
         if (line.startsWith('File: ')) {
-          if (line.endsWith('.ts') || line.endsWith('.tsx') || line.includes('.ts ')) {
+          const filename = line.replace('File: ', '').split(' (')[0]?.trim() || '';
+          if (filename.endsWith('.ts') || filename.endsWith('.tsx')) {
             langCount['TypeScript'] = (langCount['TypeScript'] || 0) + 5;
-          } else if (line.endsWith('.js') || line.endsWith('.jsx')) {
+          } else if (filename.endsWith('.js') || filename.endsWith('.jsx')) {
             langCount['JavaScript'] = (langCount['JavaScript'] || 0) + 5;
-          } else if (line.endsWith('.py')) {
+          } else if (filename.endsWith('.py')) {
             langCount['Python'] = (langCount['Python'] || 0) + 8;
-          } else if (line.endsWith('.css')) {
+          } else if (filename.endsWith('.css')) {
             langCount['CSS'] = (langCount['CSS'] || 0) + 3;
-          } else if (line.endsWith('.prisma')) {
+          } else if (filename.endsWith('.prisma')) {
             langCount['Prisma SQL'] = (langCount['Prisma SQL'] || 0) + 6;
           }
         }
