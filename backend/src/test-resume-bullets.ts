@@ -1,8 +1,6 @@
-import { PrismaClient } from '@prisma/client';
+import { prisma } from './lib/prisma';
 import { getCommitsForDate } from './services/summaryService';
 import { generateResumeBullets } from './services/aiService';
-
-const prisma = new PrismaClient();
 
 async function run() {
   console.log('=== Running Resume Bullets Injected Stats Test ===');

@@ -1,11 +1,10 @@
 import { Worker, Job } from 'bullmq';
-import { PrismaClient, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 import { redisConnectionConfig } from '../config/redis';
 import { fetchCommitDiff } from '../services/githubService';
 import { decrypt } from '../utils/crypto';
 import { summarizeCommit } from '../services/aiService';
-
-const prisma = new PrismaClient();
 
 export let workerInstance: Worker | null = null;
 

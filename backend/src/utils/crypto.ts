@@ -4,7 +4,10 @@ const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 12; // 12 bytes IV is standard for AES-GCM
 
 const getKey = (): Buffer => {
-  const rawKey = process.env.ENCRYPTION_KEY || 'default_dev_encryption_key_32_bytes_long_minimum';
+  const rawKey = process.env.ENCRYPTION_KEY;
+  if (!rawKey) {
+    throw new Error('[Crypto Error] ENCRYPTION_KEY environment variable is not configured.');
+  }
   // Hash the key to guarantee it is exactly 32 bytes (256 bits) for aes-256
   return crypto.createHash('sha256').update(rawKey).digest();
 };
@@ -36,6 +39,7 @@ export const decrypt = (encryptedText: string): string => {
   
   // Backward compatibility: if it doesn't contain colons, it's not encrypted
   if (!encryptedText.includes(':')) {
+    console.warn('[Crypto Warning] Unencrypted access token encountered in database. Operating in unencrypted fallback mode.');
     return encryptedText;
   }
 

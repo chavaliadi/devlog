@@ -1,9 +1,8 @@
 import crypto from 'crypto';
 import dotenv from 'dotenv';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from './lib/prisma';
 
 dotenv.config();
-const prisma = new PrismaClient();
 
 const SERVER_URL = 'http://localhost:5005';
 const WEBHOOK_SECRET = process.env.GITHUB_WEBHOOK_SECRET || 'devlog_webhook_secret_temp';

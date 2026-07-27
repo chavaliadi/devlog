@@ -1,6 +1,4 @@
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
 // Helper function to call Groq completions API

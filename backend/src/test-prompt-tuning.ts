@@ -1,8 +1,7 @@
-import { PrismaClient } from '@prisma/client';
+import { prisma } from './lib/prisma';
 import dotenv from 'dotenv';
 
 dotenv.config();
-const prisma = new PrismaClient();
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
 async function testPrompt(systemPrompt: string, commitMessage: string, diffText: string): Promise<string> {

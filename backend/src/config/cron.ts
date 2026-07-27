@@ -1,8 +1,6 @@
 import cron from 'node-cron';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 import { generateDailySummary } from '../services/summaryService';
-
-const prisma = new PrismaClient();
 
 export let lastCronRun: Date | null = null;
 

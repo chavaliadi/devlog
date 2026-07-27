@@ -2,7 +2,7 @@ import express, { Response } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import cookieSession from 'cookie-session';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from './lib/prisma';
 import { commitQueue } from './queues/commitQueue';
 import { startCommitWorker, pauseCommitWorker, resumeCommitWorker, isCommitWorkerPaused } from './workers/commitWorker';
 import { verifyGitHubWebhook, AuthenticatedRequest } from './middleware/verifyWebhook';
@@ -18,7 +18,6 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
-const prisma = new PrismaClient();
 
 // Capture raw body buffer for signature verification
 app.use(
@@ -29,13 +28,18 @@ app.use(
   })
 );
 
+const sessionSecret = process.env.SESSION_SECRET;
+if (!sessionSecret && process.env.NODE_ENV === 'production') {
+  throw new Error('[Auth Error] SESSION_SECRET environment variable is required in production.');
+}
+
 // Session Cookie Management (signed, httpOnly, secure-ready)
 app.use(
   cookieSession({
     name: 'devlog-session',
-    keys: [process.env.SESSION_SECRET || 'devlog_session_secret_temp'],
+    keys: [sessionSecret || 'devlog_session_secret_temp'],
     maxAge: 24 * 60 * 60 * 1000 * 30, // 30 days
-    secure: false, // In production behind HTTPS, set to true
+    secure: process.env.NODE_ENV === 'production',
     httpOnly: true,
     sameSite: 'lax',
   })
@@ -581,7 +585,7 @@ app.post('/api/repos/sync-all', requireAuth as express.RequestHandler, async (re
         { fullName: 'chavaliadi/data-crawler', language: 'Python', stars: 8 }
       ];
 
-      const syncedRepos = [];
+      const syncedRepos: any[] = [];
       for (const repo of mockRepos) {
         const dbRepo = await prisma.repository.upsert({
           where: {
@@ -645,7 +649,7 @@ app.post('/api/repos/sync-all', requireAuth as express.RequestHandler, async (re
     }
 
     // Save/update repos in DB
-    const syncedRepos = [];
+    const syncedRepos: any[] = [];
     for (const repo of allRepos) {
       const dbRepo = await prisma.repository.upsert({
         where: {
@@ -909,7 +913,7 @@ app.post('/api/commits/sync', requireAuth as express.RequestHandler, async (req:
       const mockCommits = getMockCommits();
 
       // Ensure mock repositories are created in the database first
-      const mockRepos = Array.from(new Set(mockCommits.map(c => c.repository)));
+      const mockRepos: string[] = Array.from(new Set(mockCommits.map((c: any) => c.repository as string)));
       for (const repoName of mockRepos) {
         await prisma.repository.upsert({
           where: {

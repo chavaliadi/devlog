@@ -1,7 +1,5 @@
-import { PrismaClient } from '@prisma/client';
+import { prisma } from './lib/prisma';
 import { generateDailySummary } from './services/summaryService';
-
-const prisma = new PrismaClient();
 
 async function runTest() {
   console.log('=== Starting AI Summary Service Verification Test ===');

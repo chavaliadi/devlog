@@ -1,7 +1,5 @@
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 import { generateSummary } from './aiService';
-
-const prisma = new PrismaClient();
 
 /**
  * Fetches commits for a user on a given date (YYYY-MM-DD) based on their timezone.
