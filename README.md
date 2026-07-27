@@ -104,11 +104,11 @@ sequenceDiagram
 ```
 
 ### Ingest Pipeline & Operational Features
-1.  **Authentication & AES Encryption**: Users connect their GitHub account. The backend exchanges the OAuth code for an access token, encrypts it using `AES-256-GCM` authenticated symmetric encryption, and writes it to PostgreSQL.
-2.  **Latency Isolation via BullMQ & Redis**: When a webhook is received or a manual sync is clicked, the main Express thread pushes the payload to a **BullMQ queue** and immediately returns a `202 Accepted` response. A background **BullMQ Worker** running on Redis processes the job asynchronously—fetching large text diff files from GitHub and sanitizing metadata.
-3.  **DB-Level Idempotency**: Webhook triggers can deliver redundant messages. To prevent duplicate commit processing, a database-level composite unique constraint `@@unique([repository, sha])` is enforced. Ingest jobs violating this are discarded immediately.
+1.  **Authentication & AES Encryption**: Users connect their GitHub account. The backend exchanges the OAuth code for an access token, encrypts it using `AES-256-GCM` authenticated symmetric encryption, and writes it to PostgreSQL. `ENCRYPTION_KEY` is validated at application boot to guarantee encrypted credential safety.
+2.  **Latency Isolation via BullMQ & Redis**: When a webhook is received or a manual sync is clicked, the main Express thread pushes the payload to a **BullMQ queue** and immediately returns a `202 Accepted` response. The job payload incorporates the explicit `userId` from the tracked repository model, ensuring strict multi-tenant ownership during background processing. A background **BullMQ Worker** running on Redis processes the job asynchronously—fetching large text diff files from GitHub and sanitizing metadata.
+3.  **DB-Level Idempotency**: Webhook triggers can deliver redundant messages. To prevent duplicate commit processing, a database-level composite unique constraint `@@unique([repository, sha])` is enforced. Ingest jobs and sync endpoints catch `P2002` duplicate exceptions and treat them as idempotent skips.
 4.  **Timezone-Aware Ingestion**: GitHub records commits in UTC, but developer work days span local times. The ingestion pipeline maps commit timestamps using the user's local timezone (e.g. `Asia/Kolkata`) to group daily activities accurately.
-5.  **Nightly Cron Scheduler**: A `node-cron` daemon runs hourly, triggering automated Groq AI summaries at exactly 11:00 PM in each developer's configured local timezone.
+5.  **Nightly Cron Scheduler**: A `node-cron` daemon runs hourly, triggering automated Groq AI summaries at exactly 11:00 PM in each developer's configured local timezone. Entries marked as `published` are automatically protected and preserved from being overwritten.
 
 ---
 
@@ -121,7 +121,7 @@ sequenceDiagram
 
 ### 2. Backend (Node.js, Express, TypeScript)
 *   **Express & TypeScript**: Delivers typesafe endpoints, custom request context types, and modular middlewares.
-*   **Prisma ORM**: Provides clean database schemas and relationships while ensuring typesafe DB queries.
+*   **Prisma ORM**: Provides clean database schemas and relationships while ensuring typesafe DB queries. Uses a shared client singleton instance (`lib/prisma.ts`) to prevent connection pool exhaustion.
 *   **PostgreSQL**: Selected for structural relational constraints (foreign keys, cascading deletes, unique indexes).
 *   **Redis & BullMQ**: Implements reliable message queuing and task retries (exponential backoff of 3 attempts, delayed 2s) to handle API throttling.
 *   **Groq Completions Client**: Calls the `llama-3.3-70b-versatile` engine over standard fetch APIs. Groq provides sub-second inference speeds, eliminating latency delays during summary generation and semantic searches.
