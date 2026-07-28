@@ -24,15 +24,19 @@ export const RepoSettings: React.FC<RepoSettingsProps> = ({ showToast, onTracked
   const fetchRepos = async () => {
     try {
       const res = await fetch('/api/repos');
+      if (res.status === 401) {
+        showToast('error', 'Session expired, please log in again.');
+        return;
+      }
       if (res.ok) {
         const data = await res.json();
         setRepos(data.repositories || []);
       } else {
-        showToast('error', 'Failed to retrieve repository configurations.');
+        showToast('error', 'Something went wrong, please try again.');
       }
     } catch (e: any) {
       console.error(e.message);
-      showToast('error', 'Failed to communicate with repository service.');
+      showToast('error', 'Something went wrong, please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -44,16 +48,20 @@ export const RepoSettings: React.FC<RepoSettingsProps> = ({ showToast, onTracked
       const res = await fetch('/api/repos/sync-all', {
         method: 'POST',
       });
-      const data = await res.json();
+      if (res.status === 401) {
+        showToast('error', 'Session expired, please log in again.');
+        return;
+      }
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
         setRepos(data.repositories || []);
         showToast('success', `Synced ${data.count} repositories from GitHub.`);
       } else {
-        showToast('error', data.error || 'Failed to sync repositories.');
+        showToast('error', data.error || 'Something went wrong, please try again.');
       }
     } catch (e: any) {
       console.error(e.message);
-      showToast('error', 'Failed to trigger repository synchronization.');
+      showToast('error', 'Something went wrong, please try again.');
     } finally {
       setIsSyncing(false);
     }
@@ -64,6 +72,10 @@ export const RepoSettings: React.FC<RepoSettingsProps> = ({ showToast, onTracked
       const res = await fetch(`/api/repos/${id}/toggle`, {
         method: 'PATCH',
       });
+      if (res.status === 401) {
+        showToast('error', 'Session expired, please log in again.');
+        return;
+      }
       if (res.ok) {
         setRepos(prev =>
           prev.map(r => (r.id === id ? { ...r, isTracked: !r.isTracked } : r))
@@ -78,11 +90,11 @@ export const RepoSettings: React.FC<RepoSettingsProps> = ({ showToast, onTracked
           onTrackedChange();
         }
       } else {
-        showToast('error', 'Failed to update tracking configuration.');
+        showToast('error', 'Something went wrong, please try again.');
       }
     } catch (e: any) {
       console.error(e.message);
-      showToast('error', 'Failed to update tracking settings.');
+      showToast('error', 'Something went wrong, please try again.');
     }
   };
 

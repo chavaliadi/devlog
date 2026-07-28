@@ -152,6 +152,7 @@ function App() {
       setIsAuthenticated(false);
       setUser(null);
       setIsLoading(false);
+      showToast('error', 'Something went wrong connecting to backend server.');
     }
   };
 
@@ -159,6 +160,12 @@ function App() {
     try {
       // 1. Fetch entries
       const entriesRes = await fetch('/api/entries');
+      if (entriesRes.status === 401) {
+        setIsAuthenticated(false);
+        setUser(null);
+        showToast('error', 'Session expired, please log in again.');
+        return;
+      }
       if (entriesRes.ok) {
         const entriesData = await entriesRes.json();
         setEntries(entriesData.entries || []);
@@ -166,13 +173,23 @@ function App() {
 
       // 2. Fetch commits
       const commitsRes = await fetch('/api/commits');
+      if (commitsRes.status === 401) {
+        setIsAuthenticated(false);
+        setUser(null);
+        showToast('error', 'Session expired, please log in again.');
+        return;
+      }
       if (commitsRes.ok) {
         const commitsData = await commitsRes.json();
         setCommits(commitsData.commits || []);
       }
+
+      if (!entriesRes.ok || !commitsRes.ok) {
+        showToast('error', 'Something went wrong, please try again.');
+      }
     } catch (e: any) {
       console.error('Failed to fetch data:', e.message);
-      showToast('error', 'Failed to communicate with backend database.');
+      showToast('error', 'Something went wrong, please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -198,9 +215,16 @@ function App() {
         body: JSON.stringify({}),
       });
 
-      const data = await res.json();
+      if (res.status === 401) {
+        setIsAuthenticated(false);
+        setUser(null);
+        showToast('error', 'Session expired, please log in again.');
+        return;
+      }
+
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error(data.message || 'Verification failed');
+        throw new Error(data.message || data.error || 'Something went wrong, please try again.');
       }
 
       showToast('success', 'AI Daily Summary successfully generated!');
@@ -212,7 +236,7 @@ function App() {
       }
     } catch (e: any) {
       console.error(e);
-      showToast('error', e.message || 'No commits found for today or API key invalid.');
+      showToast('error', e.message || 'Something went wrong, please try again.');
     } finally {
       setIsCompiling(false);
     }
@@ -225,18 +249,18 @@ function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (res.ok && data.success) {
         setUser(data.user);
         setIsAuthenticated(true);
         showToast('success', 'Demo Mode Activated. Welcome!');
         await fetchData();
       } else {
-        throw new Error(data.error || 'Failed to initialize Demo Mode');
+        throw new Error(data.error || 'Something went wrong, please try again.');
       }
     } catch (e: any) {
       console.error(e);
-      showToast('error', e.message || 'Demo login failed.');
+      showToast('error', e.message || 'Something went wrong, please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -249,15 +273,23 @@ function App() {
       const res = await fetch('/api/commits/sync', {
         method: 'POST',
       });
-      const data = await res.json();
+
+      if (res.status === 401) {
+        setIsAuthenticated(false);
+        setUser(null);
+        showToast('error', 'Session expired, please log in again.');
+        return;
+      }
+
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error(data.error || 'Failed to sync commits');
+        throw new Error(data.error || 'Something went wrong, please try again.');
       }
       showToast('success', data.message || 'Sync completed successfully!');
       await fetchData(); // Refresh local list of commits
     } catch (e: any) {
       console.error(e);
-      showToast('error', e.message || 'Failed to sync commits from GitHub.');
+      showToast('error', e.message || 'Something went wrong, please try again.');
     } finally {
       setIsSyncing(false);
     }
@@ -271,15 +303,23 @@ function App() {
         body: JSON.stringify({ content, status }),
       });
 
+      if (res.status === 401) {
+        setIsAuthenticated(false);
+        setUser(null);
+        showToast('error', 'Session expired, please log in again.');
+        return;
+      }
+
       if (!res.ok) {
-        throw new Error('Failed to update entry.');
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Something went wrong, please try again.');
       }
 
       showToast('success', status === 'published' ? 'Entry published successfully!' : 'Draft saved successfully.');
       await fetchData(); // Refresh data
     } catch (e: any) {
       console.error(e);
-      showToast('error', e.message || 'Failed to update entry.');
+      showToast('error', e.message || 'Something went wrong, please try again.');
     }
   };
 
@@ -289,8 +329,16 @@ function App() {
         method: 'DELETE',
       });
 
+      if (res.status === 401) {
+        setIsAuthenticated(false);
+        setUser(null);
+        showToast('error', 'Session expired, please log in again.');
+        return;
+      }
+
       if (!res.ok) {
-        throw new Error('Failed to delete entry.');
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Something went wrong, please try again.');
       }
 
       showToast('success', 'Entry deleted successfully.');
@@ -298,7 +346,7 @@ function App() {
       await fetchData();
     } catch (e: any) {
       console.error(e);
-      showToast('error', e.message || 'Failed to delete entry.');
+      showToast('error', e.message || 'Something went wrong, please try again.');
     }
   };
 
@@ -319,7 +367,7 @@ function App() {
       }
     } catch (e: any) {
       console.error(e);
-      showToast('error', 'Failed to logout correctly.');
+      showToast('error', 'Something went wrong, please try again.');
     }
   };
 
@@ -377,7 +425,11 @@ function App() {
     return (
       <div className="min-h-screen bg-[#030712] p-8">
         {toast && (
-          <div className="fixed top-6 right-6 z-50 animate-bounce">
+          <div
+            onClick={() => setToast(null)}
+            className="fixed top-6 right-6 z-50 animate-bounce cursor-pointer"
+            title="Click to dismiss"
+          >
             <div className={`flex items-center gap-2 px-4 py-3 rounded-2xl border shadow-lg glass-panel ${
               toast.type === 'success' ? 'border-emerald-500/30 text-emerald-400' : 'border-rose-500/30 text-rose-400'
             }`}>
@@ -419,7 +471,11 @@ function App() {
       <div className="flex min-h-screen bg-[#030712] items-center justify-center p-4">
         {/* Toast Alert */}
         {toast && (
-          <div className="fixed top-6 right-6 z-50 animate-bounce">
+          <div
+            onClick={() => setToast(null)}
+            className="fixed top-6 right-6 z-50 animate-bounce cursor-pointer"
+            title="Click to dismiss"
+          >
             <div className={`flex items-center gap-2 px-4 py-3 rounded-2xl border shadow-lg glass-panel ${
               toast.type === 'success' ? 'border-emerald-500/30 text-emerald-400' : 'border-rose-500/30 text-rose-400'
             }`}>
@@ -490,7 +546,11 @@ function App() {
       <main className="flex-1 ml-64 p-8 relative">
         {/* Toast Alert */}
         {toast && (
-          <div className="fixed top-6 right-6 z-50 animate-bounce">
+          <div
+            onClick={() => setToast(null)}
+            className="fixed top-6 right-6 z-50 animate-bounce cursor-pointer"
+            title="Click to dismiss"
+          >
             <div className={`flex items-center gap-2 px-4 py-3 rounded-2xl border shadow-lg glass-panel ${
               toast.type === 'success' ? 'border-emerald-500/30 text-emerald-400' : 'border-rose-500/30 text-rose-400'
             }`}>
@@ -574,6 +634,7 @@ function App() {
             onBack={() => setSelectedEntryId(null)}
             onSave={handleSaveEntry}
             onDelete={handleDeleteEntry}
+            showToast={showToast}
           />
         ) : currentTab === 'dashboard' ? (
           /* Main Dashboard View */
@@ -591,13 +652,13 @@ function App() {
           </div>
         ) : currentTab === 'intelligence' ? (
           /* Repository Intelligence Dashboard Tab View */
-          <RepoIntelligence />
+          <RepoIntelligence showToast={showToast} />
         ) : currentTab === 'timeline' ? (
           /* Engineering Timeline Tab View */
-          <EngineeringTimeline />
+          <EngineeringTimeline showToast={showToast} />
         ) : currentTab === 'search' ? (
           /* Semantic Search Tab View */
-          <SemanticSearch onSelectEntry={(id) => setSelectedEntryId(id)} />
+          <SemanticSearch onSelectEntry={(id) => setSelectedEntryId(id)} showToast={showToast} />
         ) : currentTab === 'commits' ? (
           /* Commits Feed Tab View */
           <CommitList commits={commits} />
@@ -606,7 +667,7 @@ function App() {
           <RepoSettings showToast={showToast} onTrackedChange={fetchData} />
         ) : currentTab === 'health' ? (
           /* Health Diagnostic Tab View */
-          <HealthDashboard />
+          <HealthDashboard showToast={showToast} />
         ) : (
           /* Public Share Mode Tab View (Self preview) */
           <PublicPortfolio

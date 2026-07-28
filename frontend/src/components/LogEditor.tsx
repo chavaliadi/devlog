@@ -25,6 +25,7 @@ interface LogEditorProps {
   onBack: () => void;
   onSave: (id: string, content: string, status: string) => Promise<void>;
   onDelete?: (id: string) => Promise<void>;
+  showToast?: (type: 'success' | 'error', message: string) => void;
 }
 
 // A simple local Markdown parser to avoid external dependencies
@@ -95,6 +96,7 @@ export const LogEditor: React.FC<LogEditorProps> = ({
   onBack,
   onSave,
   onDelete,
+  showToast,
 }) => {
   const [content, setContent] = useState(entry.content);
   const [status, setStatus] = useState(entry.status);
@@ -114,16 +116,20 @@ export const LogEditor: React.FC<LogEditorProps> = ({
       const res = await fetch(`/api/entries/${entry.id}/resume-bullets`, {
         method: 'POST',
       });
-      const data = await res.json();
+      if (res.status === 401) {
+        showToast?.('error', 'Session expired, please log in again.');
+        return;
+      }
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
         setResumeBullets(data.bullets);
         setShowBulletsModal(true);
       } else {
-        alert(data.error || 'Failed to generate resume bullets.');
+        showToast?.('error', data.error || 'Something went wrong, please try again.');
       }
     } catch (e) {
       console.error(e);
-      alert('Failed to connect to bullet generator service.');
+      showToast?.('error', 'Something went wrong, please try again.');
     } finally {
       setIsGeneratingBullets(false);
     }

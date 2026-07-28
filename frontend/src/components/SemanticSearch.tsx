@@ -16,9 +16,10 @@ interface SearchResult extends Entry {
 
 interface SemanticSearchProps {
   onSelectEntry: (id: string) => void;
+  showToast?: (type: 'success' | 'error', message: string) => void;
 }
 
-export const SemanticSearch: React.FC<SemanticSearchProps> = ({ onSelectEntry }) => {
+export const SemanticSearch: React.FC<SemanticSearchProps> = ({ onSelectEntry, showToast }) => {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
@@ -41,18 +42,25 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({ onSelectEntry })
 
     try {
       const res = await fetch(`/api/entries/search?query=${encodeURIComponent(searchQuery)}`);
+      if (res.status === 401) {
+        showToast?.('error', 'Session expired, please log in again.');
+        throw new Error('Session expired, please log in again.');
+      }
       if (!res.ok) {
-        throw new Error('Failed to complete semantic search.');
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || 'Something went wrong during search, please try again.');
       }
       const json = await res.json();
       if (json.success) {
         setResults(json.results || []);
       } else {
-        throw new Error(json.error || 'Server error');
+        throw new Error(json.error || 'Something went wrong, please try again.');
       }
     } catch (err: any) {
       console.error(err);
-      setError(err.message || 'An error occurred during search.');
+      const msg = err.message || 'Something went wrong, please try again.';
+      setError(msg);
+      showToast?.('error', msg);
       setResults([]);
     } finally {
       setLoading(false);

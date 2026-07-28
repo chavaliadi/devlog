@@ -24,7 +24,11 @@ interface IntelligenceData {
   evaluation: string;
 }
 
-export const RepoIntelligence: React.FC<RepoIntelligenceProps> = () => {
+interface RepoIntelligenceProps {
+  showToast?: (type: 'success' | 'error', message: string) => void;
+}
+
+export const RepoIntelligence: React.FC<RepoIntelligenceProps> = ({ showToast }) => {
   const [data, setData] = useState<IntelligenceData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -32,18 +36,25 @@ export const RepoIntelligence: React.FC<RepoIntelligenceProps> = () => {
   const fetchIntelligence = async () => {
     try {
       const res = await fetch('/api/repos/intelligence');
+      if (res.status === 401) {
+        showToast?.('error', 'Session expired, please log in again.');
+        throw new Error('Session expired, please log in again.');
+      }
       if (!res.ok) {
-        throw new Error('Failed to load repository intelligence.');
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || 'Something went wrong, please try again.');
       }
       const json = await res.json();
       if (json.success) {
         setData(json.intelligence);
       } else {
-        throw new Error(json.error || 'Server error');
+        throw new Error(json.error || 'Something went wrong, please try again.');
       }
     } catch (err: any) {
       console.error(err);
-      setError(err.message || 'Failed to communicate with backend.');
+      const msg = err.message || 'Something went wrong, please try again.';
+      setError(msg);
+      showToast?.('error', msg);
     } finally {
       setLoading(false);
     }

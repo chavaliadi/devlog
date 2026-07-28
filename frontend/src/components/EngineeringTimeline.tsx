@@ -11,7 +11,11 @@ interface TimelineEvent {
   impact: string;
 }
 
-export const EngineeringTimeline: React.FC = () => {
+interface EngineeringTimelineProps {
+  showToast?: (type: 'success' | 'error', message: string) => void;
+}
+
+export const EngineeringTimeline: React.FC<EngineeringTimelineProps> = ({ showToast }) => {
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -19,18 +23,25 @@ export const EngineeringTimeline: React.FC = () => {
   const fetchTimeline = async () => {
     try {
       const res = await fetch('/api/repos/timeline');
+      if (res.status === 401) {
+        showToast?.('error', 'Session expired, please log in again.');
+        throw new Error('Session expired, please log in again.');
+      }
       if (!res.ok) {
-        throw new Error('Failed to load engineering timeline.');
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || 'Something went wrong, please try again.');
       }
       const json = await res.json();
       if (json.success) {
         setTimeline(json.timeline);
       } else {
-        throw new Error(json.error || 'Server error');
+        throw new Error(json.error || 'Something went wrong, please try again.');
       }
     } catch (err: any) {
       console.error(err);
-      setError(err.message || 'Failed to communicate with server.');
+      const msg = err.message || 'Something went wrong, please try again.';
+      setError(msg);
+      showToast?.('error', msg);
     } finally {
       setLoading(false);
     }

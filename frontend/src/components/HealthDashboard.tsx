@@ -27,7 +27,11 @@ interface HealthData {
   serverTime: string;
 }
 
-export const HealthDashboard: React.FC = () => {
+interface HealthDashboardProps {
+  showToast?: (type: 'success' | 'error', message: string) => void;
+}
+
+export const HealthDashboard: React.FC<HealthDashboardProps> = ({ showToast }) => {
   const [data, setData] = useState<HealthData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [autoRefresh, setAutoRefresh] = useState(true);
@@ -41,13 +45,23 @@ export const HealthDashboard: React.FC = () => {
       const res = await fetch('/api/health/toggle-worker', {
         method: 'POST',
       });
+      if (res.status === 401) {
+        showToast?.('error', 'Session expired, please log in again.');
+        setError('Session expired.');
+        return;
+      }
       if (res.ok) {
         await fetchHealth();
       } else {
-        setError('Failed to toggle worker state.');
+        const errJson = await res.json().catch(() => ({}));
+        const msg = errJson.error || 'Failed to toggle worker state.';
+        setError(msg);
+        showToast?.('error', msg);
       }
     } catch (e) {
-      setError('Connection failure calling worker control gateway.');
+      const msg = 'Something went wrong, please try again.';
+      setError(msg);
+      showToast?.('error', msg);
     } finally {
       setIsTogglingWorker(false);
     }
@@ -56,16 +70,25 @@ export const HealthDashboard: React.FC = () => {
   const fetchHealth = async () => {
     try {
       const res = await fetch('/api/health');
+      if (res.status === 401) {
+        showToast?.('error', 'Session expired, please log in again.');
+        setError('Session expired.');
+        return;
+      }
       if (res.ok) {
         const json = await res.json();
         setData(json);
         setError(null);
       } else {
         const errJson = await res.json().catch(() => ({}));
-        setError(errJson.error || 'System reported diagnostic warnings.');
+        const msg = errJson.error || 'Something went wrong, please try again.';
+        setError(msg);
+        showToast?.('error', msg);
       }
     } catch (e: any) {
-      setError('Connection failure: Backend server is unreachable.');
+      const msg = 'Something went wrong, please try again.';
+      setError(msg);
+      showToast?.('error', msg);
     } finally {
       setIsLoading(false);
       setLastRefreshed(new Date());
