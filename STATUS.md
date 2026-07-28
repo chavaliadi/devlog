@@ -13,7 +13,7 @@ This file outlines the current completed work and the running configuration.
 - **Database**: Local `PostgreSQL 17` instance configured on **Port `5435`** to prevent collisions. Schemas successfully migrated and database seeded with default user `chavaliadi`.
 
 ### 2. AI daily Summary Engine
-- **Groq Integration**: Custom client connecting to Groq completions API (`llama-3.3-70b-versatile` by default) using standard `fetch` with no extra SDK overhead.
+- **Groq Integration**: Custom client connecting to Groq completions API (`openai/gpt-oss-120b` for summaries/intelligence, `openai/gpt-oss-20b` for commit rationales, `qwen/qwen3.6-27b` fallback) using standard `fetch` with no extra SDK overhead.
 - **Timezone date filters**: Dynamic, timezone-aware commit grouping based on user timezone configuration (defaults to `Asia/Kolkata`).
 - **Markdown Compiler**: Auto-generates clean, structured technical markdown entries containing Overviews, Key Changes, and Deep Dives.
 

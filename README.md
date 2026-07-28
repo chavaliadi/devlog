@@ -124,7 +124,7 @@ sequenceDiagram
 *   **Prisma ORM**: Provides clean database schemas and relationships while ensuring typesafe DB queries. Uses a shared client singleton instance (`lib/prisma.ts`) to prevent connection pool exhaustion.
 *   **PostgreSQL**: Selected for structural relational constraints (foreign keys, cascading deletes, unique indexes).
 *   **Redis & BullMQ**: Implements reliable message queuing and task retries (exponential backoff of 3 attempts, delayed 2s) to handle API throttling.
-*   **Groq Completions Client**: Calls the `llama-3.3-70b-versatile` engine over standard fetch APIs. Groq provides sub-second inference speeds, eliminating latency delays during summary generation and semantic searches.
+*   **Groq Completions Client**: Calls high-tier models (`openai/gpt-oss-120b` for daily rollups & resume bullet points, `openai/gpt-oss-20b` for per-commit rationale summaries) with single-retry fallback to `qwen/qwen3.6-27b`. Groq provides sub-second inference speeds, eliminating latency delays during summary generation and semantic searches.
 
 ---
 

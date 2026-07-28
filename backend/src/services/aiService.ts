@@ -1,17 +1,85 @@
 import dotenv from 'dotenv';
+import { SUMMARY_MODEL, COMMIT_MODEL, FALLBACK_MODEL } from '../config/aiConfig';
 
 dotenv.config();
 
+export { SUMMARY_MODEL, COMMIT_MODEL, FALLBACK_MODEL };
+
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
-export const generateSummary = async (prompt: string): Promise<string> => {
+interface ChatMessage {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+}
+
+interface RequestOptions {
+  temperature: number;
+  max_tokens: number;
+}
+
+/**
+ * Executes a Groq completion request with automatic single-retry fallback logic.
+ */
+async function callGroqWithFallback(
+  tag: string,
+  primaryModel: string,
+  messages: ChatMessage[],
+  options: RequestOptions
+): Promise<string> {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) {
     throw new Error('GROQ_API_KEY is not configured in the environment.');
   }
 
-  const model = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
+  const executeCompletion = async (model: string): Promise<string> => {
+    const response = await fetch(GROQ_API_URL, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        temperature: options.temperature,
+        max_tokens: options.max_tokens,
+      }),
+    });
 
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '');
+      throw new Error(`Groq API returned status ${response.status} ${response.statusText}: ${errorText || 'No details'}`);
+    }
+
+    const data = (await response.json()) as any;
+    const content = data.choices?.[0]?.message?.content;
+
+    if (!content) {
+      throw new Error('Groq API returned an empty completion response.');
+    }
+
+    return content.trim();
+  };
+
+  try {
+    console.log(`[${tag}] Sending request to Groq API using primary model ${primaryModel}...`);
+    const content = await executeCompletion(primaryModel);
+    console.log(`[${tag}] Response served by primary model ${primaryModel}`);
+    return content;
+  } catch (primaryErr: any) {
+    console.warn(`[${tag}] Primary model ${primaryModel} failed (${primaryErr.message}). Retrying once with fallback model ${FALLBACK_MODEL}...`);
+    try {
+      const fallbackContent = await executeCompletion(FALLBACK_MODEL);
+      console.log(`[${tag}] Response served by fallback model ${FALLBACK_MODEL} after primary failure`);
+      return fallbackContent;
+    } catch (fallbackErr: any) {
+      console.error(`[${tag}] Fallback model ${FALLBACK_MODEL} also failed: ${fallbackErr.message}`);
+      throw primaryErr;
+    }
+  }
+}
+
+export const generateSummary = async (prompt: string): Promise<string> => {
   const systemMessage = `You are a Senior Technical Writer and Developer Advocate summarizing a developer's daily work for a technical audience (engineering leaders and hiring managers).
 Your task is to write a highly professional, engaging, and clear Developer Log (Devlog) entry.
 The user will provide you with a list of commits, each with its message and filtered diff patch content.
@@ -28,51 +96,21 @@ Follow these strict formatting guidelines:
 5. Ensure the tone is professional, technical, and objective.
 6. Do not include any meta-commentary or sign-offs. Output only the markdown content.`;
 
-  console.log(`[AIService] Sending request to Groq API using model ${model}...`);
-
-  const response = await fetch(GROQ_API_URL, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: 'system', content: systemMessage },
-        { role: 'user', content: prompt },
-      ],
-      temperature: 0.2,
-      max_tokens: 2000,
-    }),
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text().catch(() => '');
-    throw new Error(`Groq API returned status ${response.status} ${response.statusText}: ${errorText || 'No details'}`);
-  }
-
-  const data = (await response.json()) as any;
-  const content = data.choices?.[0]?.message?.content;
-
-  if (!content) {
-    throw new Error('Groq API returned an empty completion response.');
-  }
-
-  return content.trim();
+  return callGroqWithFallback(
+    'AIService',
+    SUMMARY_MODEL,
+    [
+      { role: 'system', content: systemMessage },
+      { role: 'user', content: prompt },
+    ],
+    { temperature: 0.2, max_tokens: 2000 }
+  );
 };
 
 /**
  * Generates a short technical explanation for a single commit.
  */
 export const summarizeCommit = async (message: string, diffText: string): Promise<string> => {
-  const apiKey = process.env.GROQ_API_KEY;
-  if (!apiKey) {
-    throw new Error('GROQ_API_KEY is not configured in the environment.');
-  }
-
-  const model = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
-
   const systemMessage = `You are a Principal Software Engineer.
 Your task is to explain the technical RATIONALE and value of the changes in this commit in a single, active-voice sentence (under 25 words).
 Do NOT tell me what files were added or columns modified.
@@ -81,38 +119,15 @@ Connect the WHAT directly to its WHY. Start with an active technical verb. No qu
 
   const prompt = `Commit Message: ${message}\n\nFile Changes:\n${diffText}`;
 
-  console.log(`[AIService] Generating single-commit summary using model ${model}...`);
-
-  const response = await fetch(GROQ_API_URL, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: 'system', content: systemMessage },
-        { role: 'user', content: prompt },
-      ],
-      temperature: 0.1,
-      max_tokens: 150,
-    }),
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text().catch(() => '');
-    throw new Error(`Groq API returned status ${response.status} ${response.statusText} in summarizeCommit: ${errorText || 'No details'}`);
-  }
-
-  const data = (await response.json()) as any;
-  const content = data.choices?.[0]?.message?.content;
-
-  if (!content) {
-    throw new Error('Groq API returned an empty response in summarizeCommit.');
-  }
-
-  return content.trim();
+  return callGroqWithFallback(
+    'AIService',
+    COMMIT_MODEL,
+    [
+      { role: 'system', content: systemMessage },
+      { role: 'user', content: prompt },
+    ],
+    { temperature: 0.1, max_tokens: 150 }
+  );
 };
 
 /**
@@ -122,13 +137,6 @@ export const generateResumeBullets = async (
   entryContent: string,
   stats: { totalCommits: number; uniqueRepos: string[]; totalFilesChanged: number }
 ): Promise<string> => {
-  const apiKey = process.env.GROQ_API_KEY;
-  if (!apiKey) {
-    throw new Error('GROQ_API_KEY is not configured in the environment.');
-  }
-
-  const model = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
-
   const systemMessage = `You are an expert Software Engineering Career Coach and Resume Writer.
 Your task is to write 1-3 highly polished, quantified resume bullet points in standard software engineering format based on the daily work log and metadata statistics provided by the user.
 
@@ -150,36 +158,13 @@ Quantitative Metadata for the day:
 
 Write 1-3 quantified resume bullet points based on the above information.`;
 
-  console.log(`[AIService] Generating resume bullet points using model ${model}...`);
-
-  const response = await fetch(GROQ_API_URL, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: 'system', content: systemMessage },
-        { role: 'user', content: prompt },
-      ],
-      temperature: 0.3,
-      max_tokens: 300,
-    }),
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text().catch(() => '');
-    throw new Error(`Groq API returned status ${response.status} ${response.statusText} in generateResumeBullets: ${errorText || 'No details'}`);
-  }
-
-  const data = (await response.json()) as any;
-  const content = data.choices?.[0]?.message?.content;
-
-  if (!content) {
-    throw new Error('Groq API returned an empty response in generateResumeBullets.');
-  }
-
-  return content.trim();
+  return callGroqWithFallback(
+    'AIService',
+    SUMMARY_MODEL,
+    [
+      { role: 'system', content: systemMessage },
+      { role: 'user', content: prompt },
+    ],
+    { temperature: 0.3, max_tokens: 300 }
+  );
 };

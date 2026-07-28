@@ -1,44 +1,65 @@
 import { prisma } from '../lib/prisma';
+import { SUMMARY_MODEL, FALLBACK_MODEL } from '../config/aiConfig';
+
+export { SUMMARY_MODEL, FALLBACK_MODEL };
+
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
-// Helper function to call Groq completions API
+// Helper function to call Groq completions API with fallback
 async function callGroq(systemMessage: string, userMessage: string): Promise<string> {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) {
     throw new Error('GROQ_API_KEY is not configured in the environment.');
   }
 
-  const model = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
+  const executeCompletion = async (model: string): Promise<string> => {
+    const response = await fetch(GROQ_API_URL, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: systemMessage },
+          { role: 'user', content: userMessage },
+        ],
+        temperature: 0.1,
+        max_tokens: 1500,
+      }),
+    });
 
-  const response = await fetch(GROQ_API_URL, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: 'system', content: systemMessage },
-        { role: 'user', content: userMessage },
-      ],
-      temperature: 0.1,
-      max_tokens: 1500,
-    }),
-  });
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '');
+      throw new Error(`Groq API returned error status ${response.status}: ${errorText || 'No details'}`);
+    }
 
-  if (!response.ok) {
-    const errorText = await response.text().catch(() => '');
-    throw new Error(`Groq API returned error status ${response.status}: ${errorText}`);
+    const data = (await response.json()) as any;
+    const content = data.choices?.[0]?.message?.content;
+    if (!content) {
+      throw new Error('Groq API returned an empty completion response.');
+    }
+
+    return content.trim();
+  };
+
+  try {
+    console.log(`[IntelligenceService] Sending request to Groq API using primary model ${SUMMARY_MODEL}...`);
+    const content = await executeCompletion(SUMMARY_MODEL);
+    console.log(`[IntelligenceService] Response served by primary model ${SUMMARY_MODEL}`);
+    return content;
+  } catch (primaryErr: any) {
+    console.warn(`[IntelligenceService] Primary model ${SUMMARY_MODEL} failed (${primaryErr.message}). Retrying once with fallback model ${FALLBACK_MODEL}...`);
+    try {
+      const fallbackContent = await executeCompletion(FALLBACK_MODEL);
+      console.log(`[IntelligenceService] Response served by fallback model ${FALLBACK_MODEL} after primary failure`);
+      return fallbackContent;
+    } catch (fallbackErr: any) {
+      console.error(`[IntelligenceService] Fallback model ${FALLBACK_MODEL} also failed: ${fallbackErr.message}`);
+      throw primaryErr;
+    }
   }
-
-  const data = (await response.json()) as any;
-  const content = data.choices?.[0]?.message?.content;
-  if (!content) {
-    throw new Error('Groq API returned an empty completion response.');
-  }
-
-  return content.trim();
 }
 
 /**

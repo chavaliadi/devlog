@@ -1,12 +1,13 @@
 import { prisma } from './lib/prisma';
 import dotenv from 'dotenv';
+import { COMMIT_MODEL } from './config/aiConfig';
 
 dotenv.config();
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
 async function testPrompt(systemPrompt: string, commitMessage: string, diffText: string): Promise<string> {
   const apiKey = process.env.GROQ_API_KEY;
-  const model = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
+  const model = COMMIT_MODEL;
   
   const prompt = `Commit Message: ${commitMessage}\n\nFile Changes:\n${diffText}`;
   
