@@ -5,7 +5,7 @@ resource "aws_security_group" "host" {
 
   # Inbound HTTP access for web traffic to Nginx
   ingress {
-    description = "Allow inbound HTTP traffic to Nginx reverse proxy"
+    description = "Public HTTP access to Devlog through Nginx"
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"

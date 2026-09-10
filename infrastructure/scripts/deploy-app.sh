@@ -45,6 +45,12 @@ if ! grep -q "^[[:space:]]*DATABASE_URL=" "${ENV_FILE}"; then
   exit 1
 fi
 
+# Stop backend service if currently running before modifying runtime files
+if systemctl is-active --quiet devlog-backend.service 2>/dev/null; then
+  echo "Stopping active devlog-backend service before updating application files..."
+  systemctl stop devlog-backend.service
+fi
+
 # 3. Source code deployment and update
 echo "[2/10] Deploying application source into ${APP_DIR}..."
 mkdir -p /opt/devlog
@@ -119,12 +125,18 @@ if [ ! -f "${SYSTEMD_SOURCE}" ]; then
   exit 1
 fi
 
+mkdir -p /etc/systemd/system
 cp "${SYSTEMD_SOURCE}" "${SYSTEMD_TARGET}"
 chmod 644 "${SYSTEMD_TARGET}"
-systemctl daemon-reload
-systemctl enable devlog-backend.service
-systemctl restart devlog-backend.service
-echo "devlog-backend service restarted."
+
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl daemon-reload
+  systemctl enable devlog-backend.service
+  systemctl restart devlog-backend.service
+  echo "devlog-backend service restarted."
+else
+  echo "[Notice] systemctl not found; skipped service daemon-reload and restart."
+fi
 
 # 10. Configure and activate Nginx
 echo "[9/10] Configuring Nginx reverse proxy..."
@@ -133,6 +145,7 @@ if [ ! -f "${NGINX_SOURCE}" ]; then
   exit 1
 fi
 
+mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
 cp "${NGINX_SOURCE}" "${NGINX_AVAILABLE}"
 chmod 644 "${NGINX_AVAILABLE}"
 ln -sf "${NGINX_AVAILABLE}" "${NGINX_ENABLED}"
@@ -142,44 +155,54 @@ if [ -L "${NGINX_DEFAULT_ENABLED}" ]; then
   rm -f "${NGINX_DEFAULT_ENABLED}"
 fi
 
-echo "Validating Nginx configuration syntax..."
-nginx -t
-systemctl reload nginx
-echo "Nginx reloaded successfully."
+if command -v nginx >/dev/null 2>&1; then
+  echo "Validating Nginx configuration syntax..."
+  nginx -t
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl reload nginx
+    echo "Nginx reloaded successfully."
+  fi
+else
+  echo "[Notice] nginx not found; skipped configuration test and reload."
+fi
 
 # 11. Deployment verification
 echo "[10/10] Verifying deployment health..."
 
-if ! systemctl is-active --quiet devlog-backend.service; then
-  echo "[Error] devlog-backend service is not active after restart." >&2
-  echo "Inspect logs with: journalctl -u devlog-backend -n 50 --no-pager" >&2
-  exit 1
-fi
-echo "Backend systemd service is active."
-
-echo "Checking backend health at http://127.0.0.1:5005/health..."
-HEALTH_SUCCESS=false
-for i in {1..15}; do
-  if curl -fsS http://127.0.0.1:5005/health >/dev/null 2>&1; then
-    HEALTH_SUCCESS=true
-    break
+if command -v systemctl >/dev/null 2>&1; then
+  if ! systemctl is-active --quiet devlog-backend.service; then
+    echo "[Error] devlog-backend service is not active after restart." >&2
+    echo "Inspect logs with: journalctl -u devlog-backend -n 50 --no-pager" >&2
+    exit 1
   fi
-  sleep 2
-done
-
-if [ "${HEALTH_SUCCESS}" != "true" ]; then
-  echo "[Error] Backend health check failed at http://127.0.0.1:5005/health." >&2
-  echo "Inspect logs with: journalctl -u devlog-backend -n 50 --no-pager" >&2
-  exit 1
-fi
-echo "Backend health check passed."
-
-if curl -fsS http://127.0.0.1/health >/dev/null 2>&1; then
-  echo "Nginx reverse proxy health route verified at http://127.0.0.1/health."
+  echo "Backend systemd service is active."
 fi
 
-if curl -fsS http://127.0.0.1/ >/dev/null 2>&1; then
-  echo "Nginx frontend static routing verified at http://127.0.0.1/."
+if command -v curl >/dev/null 2>&1; then
+  echo "Checking backend health at http://127.0.0.1:5005/health..."
+  HEALTH_SUCCESS=false
+  for i in {1..15}; do
+    if curl -fsS http://127.0.0.1:5005/health >/dev/null 2>&1; then
+      HEALTH_SUCCESS=true
+      break
+    fi
+    sleep 2
+  done
+
+  if [ "${HEALTH_SUCCESS}" != "true" ]; then
+    echo "[Error] Backend health check failed at http://127.0.0.1:5005/health." >&2
+    echo "Inspect logs with: journalctl -u devlog-backend -n 50 --no-pager" >&2
+    exit 1
+  fi
+  echo "Backend health check passed."
+
+  if curl -fsS http://127.0.0.1/health >/dev/null 2>&1; then
+    echo "Nginx reverse proxy health route verified at http://127.0.0.1/health."
+  fi
+
+  if curl -fsS http://127.0.0.1/ >/dev/null 2>&1; then
+    echo "Nginx frontend static routing verified at http://127.0.0.1/."
+  fi
 fi
 
 echo "=== Devlog Application Deployment Completed Successfully ==="

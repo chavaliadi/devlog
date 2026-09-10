@@ -82,19 +82,31 @@ HTTPS and TLS will be added later as a separate phase.
 Application traffic flows through Nginx as the single public gateway:
 
 ```
-Public Internet
-      │
-      │ HTTP port 80
-      ▼
-   Nginx :80
-      │
-      ├── React Static Files (/opt/devlog/app/frontend/dist)
-      │
-      └── Express :5005 (127.0.0.1:5005)
-                │
-                ├── PostgreSQL localhost:5432
-                └── Redis localhost:6379
+Browser
+    │
+    ▼
+EC2 Public IPv4
+    │
+    ▼
+Security Group TCP 80
+    │
+    ▼
+Nginx :80
+    │
+    ├── React Frontend (/opt/devlog/app/frontend/dist)
+    │
+    ├── /api/* ──────┐
+    ├── /webhook/* ──┼──► Express localhost:5005
+    └── /health ─────┘          │
+                                ├── PostgreSQL localhost:5432
+                                └── Redis localhost:6379
 ```
+
+Terraform does not deploy the application itself.
+Terraform provisions the infrastructure resources and network security boundary.
+The host provisioning and deployment scripts (`setup-host.sh`, `setup-db.sh`, `deploy-app.sh`) configure the operating system and deploy the application onto the EC2 host.
+Devlog remains primarily a backend and full stack application project.
+The Terraform configuration provides supporting infrastructure to demonstrate that the full stack application can be provisioned and deployed using infrastructure as code.
 
 ### 3. AWS Systems Manager Administrative Access
 Administrative access is performed through AWS Systems Manager Session Manager.
@@ -150,6 +162,7 @@ The configuration exports the following deployment values:
 * `ec2_instance_id`: EC2 compute instance identifier.
 * `ec2_private_ip`: Private IPv4 address of the EC2 instance.
 * `ec2_public_ip`: Public IPv4 address of the EC2 instance.
+* `public_ip`: Public IPv4 address of the EC2 compute instance.
 * `application_url`: Public HTTP entry point (`http://<public_ip>`).
 * `iam_role_name`: IAM role name attached to the EC2 instance.
 * `iam_role_arn`: IAM role ARN attached to the EC2 instance.

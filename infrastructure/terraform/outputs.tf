@@ -48,6 +48,11 @@ output "ec2_public_ip" {
   value       = aws_instance.devlog.public_ip
 }
 
+output "public_ip" {
+  description = "Public IPv4 address of the Devlog compute instance"
+  value       = aws_instance.devlog.public_ip
+}
+
 output "iam_role_name" {
   description = "Name of the IAM role attached to the EC2 instance"
   value       = aws_iam_role.ec2.name
