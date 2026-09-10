@@ -1,0 +1,27 @@
+[Unit]
+Description=Devlog Backend Service
+Documentation=https://github.com/chavaliadi/Devlog
+After=network.target postgresql.service redis-server.service
+Wants=postgresql.service redis-server.service
+
+[Service]
+Type=simple
+User=devlog
+Group=devlog
+WorkingDirectory=/opt/devlog/app/backend
+Environment=PORT=5005
+Environment=NODE_ENV=production
+EnvironmentFile=/etc/devlog/devlog.env
+ExecStart=/usr/bin/node dist/index.js
+Restart=on-failure
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=devlog-backend
+
+# Security process limits
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

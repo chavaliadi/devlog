@@ -62,3 +62,9 @@ output "iam_instance_profile_name" {
   description = "Name of the IAM instance profile attached to the EC2 instance"
   value       = aws_iam_instance_profile.ec2.name
 }
+
+output "application_url" {
+  description = "Public HTTP entry point URL for the Devlog application"
+  value       = "http://${aws_instance.devlog.public_ip}"
+}
+

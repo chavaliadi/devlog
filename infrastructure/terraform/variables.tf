@@ -36,8 +36,8 @@ variable "availability_zone" {
 
 variable "instance_type" {
   type        = string
-  description = "EC2 instance type for the Devlog compute host. Review against account eligibility and pricing before applying."
-  default     = "t3.small"
+  description = "EC2 instance type for the Devlog compute host. Default is t2.micro for cost safety. Operators can choose t3.small or another type depending on workload and account eligibility."
+  default     = "t2.micro"
 }
 
 variable "root_volume_size" {

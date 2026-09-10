@@ -29,70 +29,140 @@ EC2 Compute Instance
   ↓
 AWS Systems Manager Access
 
-This architecture keeps infrastructure costs near zero, avoids distributed job scheduling issues, and matches the local runtime behavior of Devlog.
+This architecture avoids distributed job scheduling issues and matches the local runtime behavior of Devlog.
 
-## Current Resources Managed in this Stage
+## Current Managed Resources
 
-This stage provisions the network envelope, the IAM identity, and the EC2 compute instance:
+This configuration manages exactly 10 AWS resources across the network, security, IAM, and compute layers:
 
-* Dedicated AWS VPC with DNS support and DNS hostnames enabled
-* One public subnet in a single Availability Zone
-* Internet Gateway attached to the VPC
-* Public route table routing all outbound traffic to the Internet Gateway
-* Route table association for the public subnet
-* Security Group foundation with outbound internet egress allowed and zero public ingress
-* IAM Role for EC2 with an assume role policy allowing `ec2.amazonaws.com`
-* AWS managed policy `AmazonSSMManagedInstanceCore` attached to the IAM role
-* IAM Instance Profile connecting the role to the EC2 instance
-* Dynamic lookup data source for the latest official Ubuntu 24.04 LTS Noble AMI
-* EC2 compute instance placed in the public subnet with an encrypted gp3 root volume
+### Networking and Security (6 resources)
+1. `aws_vpc.devlog` (dedicated VPC with DNS support and hostnames enabled)
+2. `aws_subnet.public` (public subnet in one Availability Zone)
+3. `aws_internet_gateway.devlog` (Internet Gateway attached to the VPC)
+4. `aws_route_table.public` (public route table routing outbound traffic to the Internet Gateway)
+5. `aws_route_table_association.public` (subnet association with the public route table)
+6. `aws_security_group.host` (firewall boundary allowing inbound HTTP traffic on TCP port 80 to Nginx, outbound egress allowed, and all other inbound ports closed)
 
-## Compute and Security Architecture Details
+### IAM and Management (3 resources)
+7. `aws_iam_role.ec2` (IAM role allowing the EC2 service to assume it)
+8. `aws_iam_role_policy_attachment.ssm_core` (attaches the AWS managed policy AmazonSSMManagedInstanceCore)
+9. `aws_iam_instance_profile.ec2` (instance profile delivering IAM credentials to the compute instance)
 
-### 1. IAM Role and Least Privilege
-The EC2 instance is assigned an IAM role that grants only the permissions needed for AWS Systems Manager.
-No broad administrative privileges, S3 access, or database policies are attached.
-The instance receives temporary credentials automatically through metadata rotation.
-No static credentials or access keys exist on the server.
+### Compute (1 resource)
+10. `aws_instance.devlog` (single EC2 compute host with an encrypted gp3 root volume)
 
-### 2. AWS Systems Manager Management
-Administrative access is handled through AWS Systems Manager Session Manager.
-The managed policy `AmazonSSMManagedInstanceCore` allows the SSM agent running on Ubuntu to establish an outbound TLS connection with AWS Systems Manager endpoints.
-Because the connection initiates from inside the instance out to AWS, no public inbound ports are required.
+### Read Only Data Sources (1 data source)
+* `data.aws_ami.ubuntu` (dynamic lookup for the most recent official Canonical Ubuntu 24.04 LTS AMI)
 
-### 3. SSH Keys and Port 22
-No SSH key pair is created in Terraform, and `key_name` is left undefined.
-Inbound port 22 is completely closed in the security group.
-This eliminates credential leak risks, removes the burden of managing SSH private keys, and protects the instance from automated brute force scans.
-Administrators connect securely through the AWS Console or using the AWS CLI command:
+Note that data sources query existing AWS information and are not managed resources created by Terraform.
+
+## Network and Security Architecture Details
+
+### 1. Internet Gateway and Public Subnet
+The Internet Gateway provides direct routing between instances in the VPC and the public internet.
+It is an internet target in the public route table for `0.0.0.0/0`.
+Instances in the public subnet receive a public IPv4 address and can initiate outbound connections to the internet.
+Public subnet placement does not mean unrestricted inbound access.
+All inbound network traffic must pass through the security group.
+
+### 2. Inbound Security Boundary
+The security group allows exactly one public inbound entry point:
+* Inbound TCP port 80 from `0.0.0.0/0` routed to Nginx.
+
+All other ports remain strictly closed:
+* SSH (port 22): Closed. Administrative access is performed exclusively through AWS Systems Manager Session Manager.
+* HTTPS (port 443): Closed. Deferred to a future TLS certificate and domain management phase.
+* Backend Express (port 5005): Closed. Accessible only locally on loopback via Nginx reverse proxy.
+* PostgreSQL (port 5432 and alternate 5435): Closed. Accessible only locally on loopback.
+* Redis (port 6379): Closed. Accessible only locally on loopback.
+
+HTTP is intentionally used only for this infrastructure stage.
+HTTPS and TLS will be added later as a separate phase.
+
+Application traffic flows through Nginx as the single public gateway:
+
+```
+Public Internet
+      │
+      │ HTTP port 80
+      ▼
+   Nginx :80
+      │
+      ├── React Static Files (/opt/devlog/app/frontend/dist)
+      │
+      └── Express :5005 (127.0.0.1:5005)
+                │
+                ├── PostgreSQL localhost:5432
+                └── Redis localhost:6379
+```
+
+### 3. AWS Systems Manager Administrative Access
+Administrative access is performed through AWS Systems Manager Session Manager.
+The SSM agent running on Ubuntu initiates an outbound HTTPS connection over port 443 to regional AWS Systems Manager endpoints.
+Because the session starts outbound from the instance to AWS, no public inbound ports or SSH keys are needed.
+Administrators connect securely through the AWS Management Console or via the AWS CLI:
 
 ```bash
 aws ssm start-session --target <instance_id>
 ```
 
-### 4. Dynamic Ubuntu AMI Selection
-The configuration uses a Terraform data source to find the most recent official Canonical Ubuntu 24.04 LTS AMI in the configured region.
-This avoids hardcoded AMI identifiers that break across regions or become obsolete when new patch images are released.
+### 4. IAM Role Scoping
+The EC2 role is scoped to the AWS managed permissions required for Systems Manager operation and does not include broad administrative permissions.
+The instance profile supplies temporary, automatically rotated credentials through the instance metadata service.
+No static AWS keys or passwords are stored on disk.
 
-### 5. Instance Type and Storage
-The instance type defaults to `t3.small`, which provides 2 vCPUs and 2 GB of memory to run Node.js, PostgreSQL, and Redis comfortably.
-The instance type is fully configurable via the `instance_type` variable.
-Operators should review account eligibility, region availability, and Free Tier or credit status before applying.
-The root volume is an EBS gp3 volume defaulting to 20 GB, encrypted at rest, and set to delete on termination.
+### 5. Dynamic Ubuntu AMI Selection
+The configuration queries the official Canonical owner account (`099979779448`) for the latest Ubuntu 24.04 LTS Noble AMI.
+This eliminates hardcoded AMI IDs that fail across different regions or become obsolete after security updates.
+
+## Cost Safety and Sizing Strategy
+
+### Cost Safety Notice
+Terraform does not guarantee cost free infrastructure.
+AWS pricing, account eligibility, and promotional credits must be verified by the operator prior to running `terraform apply`.
+This project minimizes fixed expenses by intentionally omitting costly infrastructure components that are unnecessary for the single host MVP:
+
+* No AWS NAT Gateway (avoids fixed hourly charges)
+* No AWS Application Load Balancer (avoids fixed hourly charges)
+* No AWS RDS managed database (runs locally on compute for the MVP)
+* No AWS ElastiCache managed Redis cluster (runs locally on compute for the MVP)
+* No AWS ECS or EKS container orchestrators
+
+### Instance Type Selection
+The default instance type in `variables.tf` is `t2.micro` (1 vCPU, 1 GB RAM).
+This default is selected for initial cost safety, as `t2.micro` is widely eligible for the AWS Free Tier on eligible accounts.
+When running the full Devlog stack with Node.js, PostgreSQL, and Redis under active load, operators can change the instance type to `t3.small` (2 vCPUs, 2 GB RAM) by setting `instance_type = "t3.small"` in `terraform.tfvars`.
+Always verify regional instance availability and pricing for your specific AWS account.
+
+### Root Storage Allocation
+The root storage volume is configured as a 20 GB gp3 EBS block device, encrypted at rest, with deletion enabled on instance termination.
+
+## Terraform Outputs
+
+The configuration exports the following deployment values:
+* `vpc_id`: Devlog VPC identifier.
+* `vpc_cidr`: Devlog VPC IPv4 CIDR block.
+* `public_subnet_id`: Public subnet identifier.
+* `public_subnet_cidr`: Public subnet IPv4 CIDR block.
+* `internet_gateway_id`: Attached Internet Gateway identifier.
+* `public_route_table_id`: Public route table identifier.
+* `security_group_id`: Security group identifier.
+* `ec2_instance_id`: EC2 compute instance identifier.
+* `ec2_private_ip`: Private IPv4 address of the EC2 instance.
+* `ec2_public_ip`: Public IPv4 address of the EC2 instance.
+* `application_url`: Public HTTP entry point (`http://<public_ip>`).
+* `iam_role_name`: IAM role name attached to the EC2 instance.
+* `iam_role_arn`: IAM role ARN attached to the EC2 instance.
+* `iam_instance_profile_name`: IAM instance profile name.
 
 ## Resources Intentionally Deferred
 
-The following resources are intentionally not implemented in this stage:
+The following items belong to subsequent deployment stages and are not implemented here:
 
-* Devlog application deployment (scheduled for a subsequent deployment stage)
-* Installation of Node.js, PostgreSQL, Redis, and Nginx on the compute host
-* User data bootstrap scripts
-* Open inbound ports for HTTP, HTTPS, or application traffic
-* AWS RDS PostgreSQL (local database runs on the compute instance for the MVP)
-* AWS ElastiCache Redis (local Redis runs on the compute instance for the MVP)
-* AWS Application Load Balancer
-* AWS NAT Gateway
-* AWS ECS, EKS, or Kubernetes
+* HTTPS and TLS certificates (deferred to a dedicated TLS phase)
+* Application Load Balancer and Route53 DNS automation
+* Managed database or cache services
+* Multi host clustering or autoscaling
 
 ## Prerequisites
 
@@ -140,7 +210,7 @@ terraform validate
 
 ### 4. Review Execution Plan
 
-Create a speculative execution plan to preview resource changes:
+Create an execution plan to preview resource changes:
 
 ```bash
 terraform plan
@@ -156,5 +226,5 @@ terraform plan -var-file=terraform.tfvars
 ## Important Deployment Notice
 
 `terraform apply` must only be run after careful manual review.
-This stage defines the foundational networking, IAM, and compute resources in code.
+This stage defines the foundational networking, IAM, compute, and public HTTP security group rule in code.
 No infrastructure has been deployed yet.
