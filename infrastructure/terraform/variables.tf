@@ -33,3 +33,15 @@ variable "availability_zone" {
   description = "AWS Availability Zone for the public subnet"
   default     = "us-east-1a"
 }
+
+variable "instance_type" {
+  type        = string
+  description = "EC2 instance type for the Devlog compute host. Review against account eligibility and pricing before applying."
+  default     = "t3.small"
+}
+
+variable "root_volume_size" {
+  type        = number
+  description = "Size of the root EBS volume in gigabytes"
+  default     = 20
+}
